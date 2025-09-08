@@ -58,34 +58,42 @@ export function generateNickname(
   const scores: { [key: string]: number } = {}
 
   // 각 왕 별명에 대한 점수 계산
-  scores["난폭왕"] = features.negativeCount * 2
-  scores["질문왕"] = features.questionCount * 3
-  scores["링크왕"] = features.linkCount * 4
-  scores["감탄왕"] = features.exclamationCount * 2
+  scores["난폭왕"] = features.negativeCount > 15 ? features.negativeCount * 2 : 0
+  scores["질문왕"] = features.questionCount > 8 ? features.questionCount * 3 : 0
+  scores["링크왕"] = features.linkCount > 2 ? features.linkCount * 4 : 0
+  scores["감탄왕"] = features.exclamationCount > 12 ? features.exclamationCount * 2 : 0
   scores["장문왕"] = features.averageMessageLength > 100 ? 50 : 0
   scores["단답왕"] = features.averageMessageLength < 10 ? 40 : 0
-  scores["수다왕"] = features.totalMessages > 500 ? 60 : features.totalMessages / 10
-  scores["갓"] = features.positiveCount > features.negativeCount * 2 ? features.positiveCount * 2 : 0
-  scores["천사왕"] = features.positiveCount * 1.5
-  scores["화염왕"] = features.negativeCount > 15 ? features.negativeCount * 2 : 0
-  scores["정보왕"] = features.linkCount * 3 + (features.averageMessageLength > 50 ? 20 : 0)
-  scores["리액션왕"] = features.exclamationCount * 2.5
-  scores["호기심왕"] = features.questionCount * 2.5
-  scores["긍정왕"] = features.positiveCount * 2
-  scores["표현왕"] = features.exclamationCount + features.positiveCount
-  scores["에너지왕"] = features.exclamationCount + features.positiveCount + features.totalMessages / 20
-  scores["활력왕"] = features.positiveCount * 1.5 + features.exclamationCount
+  scores["수다왕"] = features.totalMessages > 300 ? 60 : features.totalMessages > 100 ? features.totalMessages / 10 : 0
+  scores["갓"] =
+    features.positiveCount > features.negativeCount * 2 && features.positiveCount > 10 ? features.positiveCount * 2 : 0
+  scores["천사왕"] = features.positiveCount > 12 ? features.positiveCount * 1.5 : 0
+  scores["화염왕"] = features.negativeCount > 20 ? features.negativeCount * 2 : 0
+  scores["정보왕"] = features.linkCount > 3 ? features.linkCount * 3 + (features.averageMessageLength > 50 ? 20 : 0) : 0
+  scores["리액션왕"] = features.exclamationCount > 15 ? features.exclamationCount * 2.5 : 0
+  scores["호기심왕"] = features.questionCount > 10 ? features.questionCount * 2.5 : 0
+  scores["긍정왕"] = features.positiveCount > 8 ? features.positiveCount * 2 : 0
+  scores["표현왕"] =
+    features.exclamationCount + features.positiveCount > 15 ? features.exclamationCount + features.positiveCount : 0
+  scores["에너지왕"] =
+    features.exclamationCount + features.positiveCount + features.totalMessages / 20 > 20
+      ? features.exclamationCount + features.positiveCount + features.totalMessages / 20
+      : 0
+  scores["활력왕"] = features.positiveCount > 6 ? features.positiveCount * 1.5 + features.exclamationCount : 0
   scores["평화왕"] = features.negativeCount < 3 && features.positiveCount > 10 ? 45 : 0
   scores["중재왕"] = features.negativeCount < 2 && features.questionCount > 5 ? 40 : 0
-  scores["박학왕"] = features.linkCount * 2 + (features.averageMessageLength > 80 ? 30 : 0)
-  scores["소통왕"] = features.questionCount + features.positiveCount
-  scores["친화왕"] = features.positiveCount + features.questionCount / 2
+  scores["박학왕"] = features.linkCount > 1 ? features.linkCount * 2 + (features.averageMessageLength > 80 ? 30 : 0) : 0
+  scores["소통왕"] =
+    features.questionCount + features.positiveCount > 12 ? features.questionCount + features.positiveCount : 0
+  scores["친화왕"] = features.positiveCount > 5 ? features.positiveCount + features.questionCount / 2 : 0
   scores["분석왕"] = features.averageMessageLength > 70 ? 35 : 0
-  scores["창의왕"] = features.exclamationCount + (features.averageMessageLength > 60 ? 20 : 0)
+  scores["창의왕"] =
+    features.exclamationCount > 3 && features.averageMessageLength > 60 ? features.exclamationCount + 20 : 0
   scores["유머왕"] = features.positiveCount > 8 && features.exclamationCount > 5 ? 30 : 0
-  scores["센스왕"] = features.positiveCount + features.exclamationCount / 2
-  scores["배려왕"] = features.positiveCount > features.negativeCount * 3 ? features.positiveCount : 0
-  scores["응원왕"] = features.positiveCount * 1.8
+  scores["센스왕"] = features.positiveCount > 4 ? features.positiveCount + features.exclamationCount / 2 : 0
+  scores["배려왕"] =
+    features.positiveCount > features.negativeCount * 3 && features.positiveCount > 6 ? features.positiveCount : 0
+  scores["응원왕"] = features.positiveCount > 7 ? features.positiveCount * 1.8 : 0
   scores["격려왕"] = features.positiveCount > 12 ? features.positiveCount * 1.5 : 0
   scores["위로왕"] = features.positiveCount > 8 && features.negativeCount < 5 ? 25 : 0
 
@@ -94,7 +102,7 @@ export function generateNickname(
   )
 
   for (const { king } of sortedKings) {
-    const nickname = `${king}${speaker}`
+    const nickname = `${king} ${speaker}`
     if (!usedNicknames.has(nickname)) {
       usedNicknames.add(nickname)
       return nickname
@@ -102,7 +110,7 @@ export function generateNickname(
   }
 
   // 모든 별명이 사용된 경우 기본값
-  return `개성파${speaker}`
+  return `개성파 ${speaker}`
 }
 
 export function generateTraits(features: SpeakerFeatures): string[] {
