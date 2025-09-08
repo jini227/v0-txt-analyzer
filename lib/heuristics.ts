@@ -102,10 +102,9 @@ export function generateNickname(
   )
 
   for (const { king } of sortedKings) {
-    const nickname = `${king} ${speaker}`
-    if (!usedNicknames.has(nickname)) {
-      usedNicknames.add(nickname)
-      return nickname
+    if (!usedNicknames.has(king)) {
+      usedNicknames.add(king)
+      return `${king} ${speaker}`
     }
   }
 
