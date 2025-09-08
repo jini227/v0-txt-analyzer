@@ -42,21 +42,9 @@ export default function SpeakerWordsPage() {
   const [selectedSpeaker, setSelectedSpeaker] = useState<string>("all")
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
 
-  // 카카오 SDK 로드
   useEffect(() => {
-    const script = document.createElement("script")
-    script.src = "https://developers.kakao.com/sdk/js/kakao.min.js"
-    script.async = true
-    script.onload = () => {
-      if (window.Kakao && process.env.NEXT_PUBLIC_KAKAO_JS_KEY) {
-        window.Kakao.init(process.env.NEXT_PUBLIC_KAKAO_JS_KEY)
-      }
-    }
-    document.head.appendChild(script)
-
-    return () => {
-      document.head.removeChild(script)
-    }
+    // 카카오 SDK 로드는 사용자가 직접 설정할 수 있도록 비활성화
+    console.log("카카오톡 공유 기능을 사용하려면 Project Settings에서 카카오 JS 키를 설정하세요.")
   }, [])
 
   const handleFileSelect = async (selectedFile: File) => {
@@ -99,7 +87,6 @@ export default function SpeakerWordsPage() {
     const wordAnalysis = analyzeWords(filteredMessages)
     setAnalysis(wordAnalysis)
 
-    // 글로벌 랭킹 계산
     const wordMap = new Map<string, { speaker: string; count: number }[]>()
 
     wordAnalysis.forEach((speakerAnalysis) => {
@@ -185,49 +172,9 @@ export default function SpeakerWordsPage() {
   }
 
   const handleKakaoShare = async () => {
-    try {
-      if (!window.Kakao?.isInitialized()) {
-        alert("카카오 SDK가 초기화되지 않았습니다.")
-        return
-      }
-
-      const blob = await captureElement("analysis-results")
-
-      // S3 업로드는 실제 구현에서 API 엔드포인트를 통해 처리
-      // 여기서는 시뮬레이션
-      const imageUrl = URL.createObjectURL(blob)
-
-      window.Kakao.Share.sendDefault({
-        objectType: "feed",
-        content: {
-          title: "KKO Analyzer - 화자별 Top 단어 분석",
-          description: "카카오톡 대화의 화자별 단어 사용 패턴을 분석한 결과입니다.",
-          imageUrl: imageUrl,
-          link: {
-            mobileWebUrl: window.location.origin + "/kko/page2",
-            webUrl: window.location.origin + "/kko/page2",
-          },
-        },
-        buttons: [
-          {
-            title: "다시 분석",
-            link: {
-              mobileWebUrl: window.location.origin + "/kko/page2",
-              webUrl: window.location.origin + "/kko/page2",
-            },
-          },
-          {
-            title: "메뉴",
-            link: {
-              mobileWebUrl: window.location.origin + "/kko",
-              webUrl: window.location.origin + "/kko",
-            },
-          },
-        ],
-      })
-    } catch (error) {
-      console.error("카카오 공유 오류:", error)
-    }
+    alert(
+      "카카오톡 공유 기능을 사용하려면 Project Settings에서 카카오 JavaScript 키를 설정하고 카카오 SDK를 수동으로 로드해주세요.",
+    )
   }
 
   const handleDownloadCSV = () => {
@@ -236,7 +183,6 @@ export default function SpeakerWordsPage() {
     downloadCSV(csv, `speaker_words_${new Date().toISOString().split("T")[0]}.csv`)
   }
 
-  // 필터링된 분석 결과
   const filteredAnalysis = analysis.filter((speakerAnalysis) => {
     if (selectedSpeaker !== "all" && speakerAnalysis.speaker !== selectedSpeaker) {
       return false
@@ -273,7 +219,6 @@ export default function SpeakerWordsPage() {
         </div>
       </div>
 
-      {/* 파일 업로드 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -307,7 +252,6 @@ export default function SpeakerWordsPage() {
         </CardContent>
       </Card>
 
-      {/* 화자 선택 */}
       {parseResult && (
         <Card>
           <CardHeader>
@@ -322,7 +266,6 @@ export default function SpeakerWordsPage() {
         </Card>
       )}
 
-      {/* 검색 및 필터 */}
       {analysis.length > 0 && (
         <Card>
           <CardHeader>
@@ -360,7 +303,6 @@ export default function SpeakerWordsPage() {
         </Card>
       )}
 
-      {/* 분석 결과 */}
       {analysis.length > 0 && (
         <div id="analysis-results" className="space-y-6">
           {filteredAnalysis.map((speakerAnalysis) => {
@@ -387,7 +329,6 @@ export default function SpeakerWordsPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Top 10 테이블 */}
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
@@ -411,7 +352,6 @@ export default function SpeakerWordsPage() {
                     </table>
                   </div>
 
-                  {/* 사용 시점 보기 */}
                   <Collapsible open={isExpanded} onOpenChange={() => toggleSection(sectionId)}>
                     <CollapsibleTrigger asChild>
                       <Button variant="ghost" className="w-full justify-between">
@@ -455,7 +395,6 @@ export default function SpeakerWordsPage() {
             )
           })}
 
-          {/* 다운로드 */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -472,7 +411,6 @@ export default function SpeakerWordsPage() {
         </div>
       )}
 
-      {/* 빈 상태 */}
       {!parseResult && !isProcessing && (
         <EmptyState
           title="TXT를 업로드해 시작하세요"
@@ -480,7 +418,6 @@ export default function SpeakerWordsPage() {
         />
       )}
 
-      {/* 상세 로그 */}
       {showDetailedLog && parseResult && (
         <Card>
           <CardHeader>
@@ -501,7 +438,6 @@ export default function SpeakerWordsPage() {
   )
 }
 
-// 카카오 SDK 타입 선언
 declare global {
   interface Window {
     Kakao: any

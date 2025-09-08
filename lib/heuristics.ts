@@ -17,53 +17,87 @@ const PRAISE_PATTERNS = [/칭찬|잘했|훌륭|멋져|대단|최고|짱|완벽|�
 
 const APOLOGY_PATTERNS = [/죄송|미안|sorry|실수|잘못|용서|사과/]
 
+const KING_NICKNAMES = [
+  "난폭왕",
+  "질문왕",
+  "링크왕",
+  "감탄왕",
+  "장문왕",
+  "단답왕",
+  "수다왕",
+  "갓",
+  "천사왕",
+  "화염왕",
+  "정보왕",
+  "리액션왕",
+  "호기심왕",
+  "긍정왕",
+  "표현왕",
+  "에너지왕",
+  "활력왕",
+  "평화왕",
+  "중재왕",
+  "박학왕",
+  "소통왕",
+  "친화왕",
+  "분석왕",
+  "창의왕",
+  "유머왕",
+  "센스왕",
+  "배려왕",
+  "응원왕",
+  "격려왕",
+  "위로왕",
+]
+
 export function generateNickname(
   speaker: string,
   features: SpeakerFeatures,
   usedNicknames: Set<string> = new Set(),
 ): string {
-  const candidates: string[] = []
+  const scores: { [key: string]: number } = {}
 
-  // 감정 기반 별명 (8가지)
-  if (features.negativeCount > 10) candidates.push(`난폭왕${speaker}`, `화염방사기${speaker}`, `폭풍전사${speaker}`)
-  if (features.positiveCount > features.negativeCount * 2 && features.positiveCount > 8) {
-    candidates.push(`갓${speaker}`, `천사${speaker}`, `햇살${speaker}`, `비타민${speaker}`)
-  }
+  // 각 왕 별명에 대한 점수 계산
+  scores["난폭왕"] = features.negativeCount * 2
+  scores["질문왕"] = features.questionCount * 3
+  scores["링크왕"] = features.linkCount * 4
+  scores["감탄왕"] = features.exclamationCount * 2
+  scores["장문왕"] = features.averageMessageLength > 100 ? 50 : 0
+  scores["단답왕"] = features.averageMessageLength < 10 ? 40 : 0
+  scores["수다왕"] = features.totalMessages > 500 ? 60 : features.totalMessages / 10
+  scores["갓"] = features.positiveCount > features.negativeCount * 2 ? features.positiveCount * 2 : 0
+  scores["천사왕"] = features.positiveCount * 1.5
+  scores["화염왕"] = features.negativeCount > 15 ? features.negativeCount * 2 : 0
+  scores["정보왕"] = features.linkCount * 3 + (features.averageMessageLength > 50 ? 20 : 0)
+  scores["리액션왕"] = features.exclamationCount * 2.5
+  scores["호기심왕"] = features.questionCount * 2.5
+  scores["긍정왕"] = features.positiveCount * 2
+  scores["표현왕"] = features.exclamationCount + features.positiveCount
+  scores["에너지왕"] = features.exclamationCount + features.positiveCount + features.totalMessages / 20
+  scores["활력왕"] = features.positiveCount * 1.5 + features.exclamationCount
+  scores["평화왕"] = features.negativeCount < 3 && features.positiveCount > 10 ? 45 : 0
+  scores["중재왕"] = features.negativeCount < 2 && features.questionCount > 5 ? 40 : 0
+  scores["박학왕"] = features.linkCount * 2 + (features.averageMessageLength > 80 ? 30 : 0)
+  scores["소통왕"] = features.questionCount + features.positiveCount
+  scores["친화왕"] = features.positiveCount + features.questionCount / 2
+  scores["분석왕"] = features.averageMessageLength > 70 ? 35 : 0
+  scores["창의왕"] = features.exclamationCount + (features.averageMessageLength > 60 ? 20 : 0)
+  scores["유머왕"] = features.positiveCount > 8 && features.exclamationCount > 5 ? 30 : 0
+  scores["센스왕"] = features.positiveCount + features.exclamationCount / 2
+  scores["배려왕"] = features.positiveCount > features.negativeCount * 3 ? features.positiveCount : 0
+  scores["응원왕"] = features.positiveCount * 1.8
+  scores["격려왕"] = features.positiveCount > 12 ? features.positiveCount * 1.5 : 0
+  scores["위로왕"] = features.positiveCount > 8 && features.negativeCount < 5 ? 25 : 0
 
-  // 행동 패턴 기반 별명 (12가지)
-  if (features.questionCount > 8) candidates.push(`질문왕${speaker}`, `호기심대장${speaker}`, `궁금이${speaker}`)
-  if (features.linkCount > 5) candidates.push(`링크왕${speaker}`, `정보수집가${speaker}`, `뉴스봇${speaker}`)
-  if (features.exclamationCount > 15) candidates.push(`감탄왕${speaker}`, `리액션킹${speaker}`, `표현대장${speaker}`)
-  if (features.averageMessageLength > 100)
-    candidates.push(`장문왕${speaker}`, `소설가${speaker}`, `에세이스트${speaker}`)
-  if (features.averageMessageLength < 10) candidates.push(`단답왕${speaker}`, `미니멀${speaker}`, `간결이${speaker}`)
+  const sortedKings = KING_NICKNAMES.map((king) => ({ king, score: scores[king] || 0 })).sort(
+    (a, b) => b.score - a.score,
+  )
 
-  // 시간대 기반 별명 (6가지)
-  const timeDistribution = features.timeDistribution
-  const maxTimeSlot = Object.entries(timeDistribution).reduce((a, b) => (a[1] > b[1] ? a : b))[0]
-  if (maxTimeSlot === "새벽") candidates.push(`올빼미${speaker}`, `야행성${speaker}`)
-  else if (maxTimeSlot === "오전") candidates.push(`아침형${speaker}`, `일찍이${speaker}`)
-  else if (maxTimeSlot === "저녁") candidates.push(`저녁형${speaker}`, `황혼족${speaker}`)
-
-  // 특수 패턴 기반 별명 (10가지)
-  const messageRatio = features.totalMessages / 100
-  if (messageRatio > 5) candidates.push(`수다왕${speaker}`, `채팅머신${speaker}`, `말많은${speaker}`)
-  if (messageRatio < 1) candidates.push(`조용이${speaker}`, `관찰자${speaker}`, `신중한${speaker}`)
-
-  // 복합 특성 별명 (8가지)
-  if (features.positiveCount > 5 && features.questionCount > 5) candidates.push(`친근한${speaker}`, `사교적${speaker}`)
-  if (features.linkCount > 3 && features.averageMessageLength > 50)
-    candidates.push(`정보통${speaker}`, `박학다식${speaker}`)
-  if (features.exclamationCount > 10 && features.positiveCount > 8)
-    candidates.push(`에너지${speaker}`, `활력소${speaker}`)
-  if (features.negativeCount < 2 && features.positiveCount > 10)
-    candidates.push(`평화주의자${speaker}`, `중재자${speaker}`)
-
-  // 사용되지 않은 별명 선택
-  for (const candidate of candidates) {
-    if (!usedNicknames.has(candidate)) {
-      usedNicknames.add(candidate)
-      return candidate
+  for (const { king } of sortedKings) {
+    const nickname = `${king}${speaker}`
+    if (!usedNicknames.has(nickname)) {
+      usedNicknames.add(nickname)
+      return nickname
     }
   }
 
