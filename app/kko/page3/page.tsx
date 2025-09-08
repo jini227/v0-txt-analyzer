@@ -194,10 +194,10 @@ export default function VibeAnalysisPage() {
     let nickname = speaker
     const traits: string[] = []
 
-    if (features.negativeCount >= 10) {
+    if (features.negativeCount >= 10 && features.negativeCount > features.positiveCount) {
       nickname = `난폭왕${speaker}`
       traits.push("과격파")
-    } else if (features.positiveCount >= 10) {
+    } else if (features.positiveCount >= 10 && features.positiveCount > features.negativeCount) {
       nickname = `갓${speaker}`
       traits.push("긍정왕")
     }
@@ -212,7 +212,7 @@ export default function VibeAnalysisPage() {
     if (maxTimeSlot === "새벽") traits.push("올빼미")
     else if (maxTimeSlot === "오전") traits.push("아침형")
 
-    const uniqueNickname = `${nickname}${traits.length}`
+    const uniqueNickname = `${nickname}`
     if (!usedNicknames.has(uniqueNickname)) {
       usedNicknames.add(uniqueNickname)
       return uniqueNickname
