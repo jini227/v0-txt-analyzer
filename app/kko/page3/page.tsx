@@ -17,6 +17,7 @@ import { analyzeVibe } from "@/lib/analysis"
 import type { ParseResult } from "@/lib/parseKakao"
 import type { SpeakerVibeAnalysis } from "@/lib/analysis"
 
+// -------------------- 설정 타입 --------------------
 interface VibeSettings {
   aggressivenessSensitivity: number
   praiseSensitivity: number
@@ -26,6 +27,209 @@ interface VibeSettings {
   timePatternSensitivity: number
 }
 
+// 분석 피처 타입(heuristics.ts가 만들어 준 features와 동일 구조)
+type Feature = {
+  positiveCount: number
+  negativeCount: number
+  questionCount: number
+  linkCount: number
+  exclamationCount: number
+  averageMessageLength: number
+  timeDistribution: Record<string, number>
+}
+
+// -------------------- 유틸 · 점수화 --------------------
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x))
+const scale = (pct: number, min: number, max: number) => min + (pct / 100) * (max - min)
+const contrast = (x: number, gamma: number) => clamp01(Math.pow(clamp01(x), gamma))
+
+// 1) 데이터만으로 만든 기본 점수(슬라이더 영향 없음)
+function baseBucketScores(f: Feature) {
+  const totalTime = Object.values(f.timeDistribution).reduce((a, b) => a + b, 0) || 1
+  const r = (k: string) => (f.timeDistribution[k] || 0) / totalTime
+
+  const totalSent = f.negativeCount + f.positiveCount
+  const coverage = clamp01(totalSent / 30) // 샘플 부족 과대해석 방지
+
+  const negRel = totalSent > 0 ? Math.max(0, f.negativeCount - f.positiveCount) / totalSent : 0
+  const posRel = totalSent > 0 ? Math.max(0, f.positiveCount - f.negativeCount) / totalSent : 0
+
+  const exclaim = clamp01(f.exclamationCount / 35)
+
+  return {
+    난폭: clamp01(negRel * 0.9 + exclaim * 0.1) * coverage,
+    긍정: clamp01(posRel) * coverage,
+    궁금: clamp01(f.questionCount / 25),
+    링크: clamp01(f.linkCount / 20),
+    감탄: clamp01(f.exclamationCount / 35),
+    수다: clamp01(f.averageMessageLength / 120),
+    올빼미: clamp01(r("새벽") / 0.45),
+    아침형: clamp01(r("오전") / 0.45),
+  }
+}
+
+// 2) 슬라이더 가중/바이어스 강하게 적용
+function applySettingsWeights(base: Record<string, number>, settings: VibeSettings) {
+  // 0.25~4배 가중, -0.25~+0.25 바이어스
+  const w = {
+    난폭: scale(settings.aggressivenessSensitivity, 0.25, 4.0),
+    긍정: scale(settings.praiseSensitivity, 0.25, 4.0),
+    궁금: scale(settings.questionSensitivity, 0.25, 4.0),
+    감탄: scale(settings.emotionSensitivity, 0.25, 4.0),
+    수다: scale(settings.messageLengthSensitivity, 0.25, 4.0),
+    올빼미: scale(settings.timePatternSensitivity, 0.25, 4.0),
+    아침형: scale(settings.timePatternSensitivity, 0.25, 4.0),
+    링크: 1.0,
+  }
+  const b = {
+    난폭: scale(settings.aggressivenessSensitivity, -0.25, 0.25),
+    긍정: scale(settings.praiseSensitivity, -0.25, 0.25),
+    궁금: scale(settings.questionSensitivity, -0.2, 0.2),
+    감탄: scale(settings.emotionSensitivity, -0.2, 0.2),
+    수다: scale(settings.messageLengthSensitivity, -0.2, 0.2),
+    올빼미: scale(settings.timePatternSensitivity, -0.15, 0.15),
+    아침형: scale(settings.timePatternSensitivity, -0.15, 0.15),
+    링크: 0,
+  }
+
+  const out: Record<string, number> = {}
+  for (const k of Object.keys(base)) {
+    out[k] = clamp01(base[k] * (w as any)[k] + (b as any)[k])
+  }
+
+  // 극단값 부스트
+  if (settings.aggressivenessSensitivity >= 90 && base["난폭"] > 0.05) out["난폭"] = clamp01(out["난폭"] + 0.15)
+  if (settings.praiseSensitivity >= 90 && base["긍정"] > 0.05) out["긍정"] = clamp01(out["긍정"] + 0.15)
+  if (settings.questionSensitivity >= 90 && base["궁금"] > 0.05) out["궁금"] = clamp01(out["궁금"] + 0.12)
+  if (settings.emotionSensitivity >= 90 && base["감탄"] > 0.05) out["감탄"] = clamp01(out["감탄"] + 0.12)
+  if (settings.messageLengthSensitivity >= 90 && base["수다"] > 0.05) out["수다"] = clamp01(out["수다"] + 0.12)
+
+  // 대비(감마)로 순위 차 더 벌리기
+  const gamma = 0.65
+  for (const k of Object.keys(out)) out[k] = contrast(out[k], gamma)
+
+  return out
+}
+
+// 3) 최종 점수 (이 값을 기준으로 별명/특성 결정)
+function finalBucketScores(f: Feature, settings: VibeSettings) {
+  const base = baseBucketScores(f)
+  return applySettingsWeights(base, settings)
+}
+
+// -------------------- 별명/특성 사전 & 중복 방지 --------------------
+const nicknameSynonyms: Record<string, string[]> = {
+  난폭: ["직설가", "스트레이트", "확신러", "난폭왕"],
+  긍정: ["해피메이커", "햇살러", "무드업", "갓"],
+  // ‘호기심천국’은 후순위로
+  궁금: ["질문요정", "왜맨", "호기심러", "탐구왕", "호기심천국"],
+  링크: ["링크수집가", "정보브로커", "링크러", "자료왕"],
+  감탄: ["리액션장인", "표현대장", "감탄머신", "리액션봇"],
+  수다: ["디테일러", "장문러", "설명왕", "분석러"],
+  올빼미: ["올빼미", "야행성", "새벽러", "밤지킴이"],
+  아침형: ["아침형", "아침지킴이", "모닝러", "모닝버드"],
+}
+
+const traitSynonyms: Record<string, string[]> = {
+  난폭: ["과격파", "직설파", "스트레이트"],
+  긍정: ["긍정왕", "낙관파", "분위기메이커"],
+  궁금: ["궁금이", "탐구파", "왜많이묻는러"],
+  링크: ["링크수집가", "정보수집가", "큐레이터"],
+  감탄: ["리액션장인", "표현대장", "감탄러"],
+  수다: ["디테일러", "장문러", "설명러"],
+  올빼미: ["올빼미", "야행성", "새벽형"],
+  아침형: ["아침형", "모닝형", "아침지킴이"],
+}
+
+const isKing = (s: string) => s.endsWith("왕")
+const kingHead = (s: string) => (isKing(s) ? s.slice(0, -1) : "")
+
+function chooseNicknameBase(
+  primaryKey: string,
+  secondaryKey: string | undefined,
+  usedBases: Set<string>,
+  usedKingHeads: Set<string>,
+) {
+  const list = nicknameSynonyms[primaryKey] ?? []
+
+  // 1) 비-왕 & 미사용
+  for (const b of list) if (!isKing(b) && !usedBases.has(b)) { usedBases.add(b); return b }
+
+  // 2) 왕 & 미사용 & 헤드 미사용
+  for (const b of list) {
+    if (isKing(b) && !usedBases.has(b) && !usedKingHeads.has(kingHead(b))) {
+      usedBases.add(b)
+      usedKingHeads.add(kingHead(b))
+      return b
+    }
+  }
+
+  // 3) 동의어 소진 시 하이브리드
+  if (secondaryKey) {
+    const a = (nicknameSynonyms[primaryKey] || []).find((x) => !isKing(x)) || (nicknameSynonyms[primaryKey] || [primaryKey])[0]
+    const b = (nicknameSynonyms[secondaryKey] || []).find((x) => !isKing(x)) || (nicknameSynonyms[secondaryKey] || [secondaryKey])[0]
+    const hybrid = `${a}-${b}`
+    if (!usedBases.has(hybrid)) { usedBases.add(hybrid); return hybrid }
+  }
+
+  // 4) 최후: 자연 접미어
+  const seed = (nicknameSynonyms[primaryKey] || [primaryKey])[0]
+  for (const t of ["에이스", "리드", "마스터"]) {
+    const v = `${seed}${t}`
+    if (!usedBases.has(v)) { usedBases.add(v); return v }
+  }
+  usedBases.add(seed)
+  return seed
+}
+
+// -------------------- 별명/특성 생성(슬라이더 반영) --------------------
+function makeNicknameAndTraits(
+  speaker: string,
+  f: Feature,
+  settings: VibeSettings,
+  usedNicknameBases: Set<string>,
+  usedKingHeads: Set<string>,
+  traitUsageCount: Map<string, number>,
+): { nickname: string; traits: string[] } {
+  // 1) 슬라이더 반영 최종 점수
+  const scores = finalBucketScores(f, settings)
+  const ordered = Object.entries(scores).sort((a, b) => b[1] - a[1])
+  const topKey = ordered[0][0]
+  const secondKey = ordered[1]?.[0]
+
+  // 2) 별명 베이스 선택(겹치지 않게)
+  const base = chooseNicknameBase(topKey, secondKey, usedNicknameBases, usedKingHeads)
+  const nickname = `${base}${speaker}`
+
+  // 3) 특성: 임계 0.33 이상, 덜 쓰인 라벨 우선, 최대 3개
+  const traits: string[] = []
+  for (const [k, v] of ordered.slice(1)) {
+    if (v < 0.33) continue
+    const candidates = traitSynonyms[k] ?? [k]
+    let best = candidates[0]
+    let bestCnt = traitUsageCount.get(best) ?? 0
+    for (const c of candidates) {
+      const cnt = traitUsageCount.get(c) ?? 0
+      if (cnt < bestCnt) { best = c; bestCnt = cnt }
+    }
+    if (!traits.includes(best)) {
+      traits.push(best)
+      traitUsageCount.set(best, (traitUsageCount.get(best) ?? 0) + 1)
+    }
+    if (traits.length >= 3) break
+  }
+
+  // 4) 보완: 하나도 못 뽑으면 2등 키에서 1개
+  if (traits.length === 0 && ordered[1]) {
+    const t = (traitSynonyms[ordered[1][0]] ?? [ordered[1][0]])[0]
+    traits.push(t)
+    traitUsageCount.set(t, (traitUsageCount.get(t) ?? 0) + 1)
+  }
+
+  return { nickname, traits }
+}
+
+// -------------------- 컴포넌트 --------------------
 export default function VibeAnalysisPage() {
   const [file, setFile] = useState<File | null>(null)
   const [parseResult, setParseResult] = useState<ParseResult | null>(null)
@@ -44,7 +248,6 @@ export default function VibeAnalysisPage() {
     timePatternSensitivity: 50,
   })
   const [useAI, setUseAI] = useState(false)
-  const [usedNicknames] = useState<Set<string>>(new Set())
 
   useState(() => {
     setUseAI(process.env.NEXT_PUBLIC_USE_AI === "true")
@@ -82,42 +285,44 @@ export default function VibeAnalysisPage() {
     }
   }
 
+  const enhanceWithAI = async (
+    heuristicAnalyses: SpeakerVibeAnalysis[],
+    heuristicSummary: string,
+  ): Promise<{ roomSummary: string; speakerAnalyses: SpeakerVibeAnalysis[] }> => {
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    return {
+      roomSummary: `${heuristicSummary} AI 분석을 통해 더욱 정확한 특성을 파악했습니다.`,
+      speakerAnalyses: heuristicAnalyses.map((a) => ({
+        ...a,
+        nickname: `AI-${a.nickname}`,
+        traits: [...a.traits, "AI분석"],
+      })),
+    }
+  }
+
   const handleAnalyze = async () => {
     if (!parseResult) return
-
     setIsAnalyzing(true)
-    usedNicknames.clear()
 
     try {
       const filteredMessages = parseResult.messages.filter((msg) => includedSpeakers.includes(msg.speaker))
-
       const heuristicResult = analyzeVibe(filteredMessages)
 
+      // 중복 방지 세트/카운터(매 분석마다 초기화)
+      const usedNicknameBases = new Set<string>()
+      const usedKingHeads = new Set<string>()  // ← '...왕' 헤드 중복 방지
+      const traitUsageCount = new Map<string, number>()
+
       const adjustedAnalyses = heuristicResult.speakerAnalyses.map((analysis) => {
-        const aggressiveThreshold = (settings.aggressivenessSensitivity / 100) * 10
-        const praiseThreshold = (settings.praiseSensitivity / 100) * 10
-        const questionThreshold = (settings.questionSensitivity / 100) * 8
-        const emotionThreshold = (settings.emotionSensitivity / 100) * 15
-        const lengthThreshold = (settings.messageLengthSensitivity / 100) * 100
-        const timeThreshold = (settings.timePatternSensitivity / 100) * 0.4
-
-        const nickname = generateNickname(analysis.speaker, analysis.features, usedNicknames)
-        const traits = generateTraits(analysis.features)
-
-        if (analysis.features.questionCount >= questionThreshold) traits.push("궁금이")
-        if (analysis.features.exclamationCount >= emotionThreshold) traits.push("표현대장")
-        if (analysis.features.averageMessageLength >= lengthThreshold) traits.push("디테일러")
-
-        const timeDistribution = analysis.features.timeDistribution
-        const totalMessages = Object.values(timeDistribution).reduce((sum, count) => sum + count, 0)
-        const dominantTimeRatio = Math.max(...Object.values(timeDistribution)) / totalMessages
-        if (dominantTimeRatio >= timeThreshold) traits.push("시간규칙적")
-
-        return {
-          ...analysis,
-          nickname,
-          traits: traits.slice(0, 4),
-        }
+        const { nickname, traits } = makeNicknameAndTraits(
+          analysis.speaker,
+          analysis.features as Feature,
+          settings,
+          usedNicknameBases,
+          usedKingHeads,
+          traitUsageCount,
+        )
+        return { ...analysis, nickname, traits }
       })
 
       if (useAI) {
@@ -141,32 +346,12 @@ export default function VibeAnalysisPage() {
     }
   }
 
-  const enhanceWithAI = async (
-    heuristicAnalyses: SpeakerVibeAnalysis[],
-    heuristicSummary: string,
-  ): Promise<{ roomSummary: string; speakerAnalyses: SpeakerVibeAnalysis[] }> => {
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-
-    return {
-      roomSummary: `${heuristicSummary} AI 분석을 통해 더욱 정확한 특성을 파악했습니다.`,
-      speakerAnalyses: heuristicAnalyses.map((analysis) => ({
-        ...analysis,
-        nickname: `AI-${analysis.nickname}`,
-        traits: [...analysis.traits, "AI분석"],
-      })),
-    }
-  }
-
   const handleSpeakerRemove = (speaker: string) => {
     setIncludedSpeakers((prev) => prev.filter((s) => s !== speaker))
   }
-
   const handleSpeakerAdd = (speaker: string) => {
-    if (!includedSpeakers.includes(speaker)) {
-      setIncludedSpeakers((prev) => [...prev, speaker])
-    }
+    if (!includedSpeakers.includes(speaker)) setIncludedSpeakers((prev) => [...prev, speaker])
   }
-
   const handleClearFile = () => {
     setFile(null)
     setParseResult(null)
@@ -174,69 +359,15 @@ export default function VibeAnalysisPage() {
     setSpeakerAnalyses([])
     setIncludedSpeakers([])
   }
-
-  const handleReanalyze = () => {
-    handleAnalyze()
-  }
+  const handleReanalyze = () => handleAnalyze()
 
   const getTimeDistributionText = (timeDistribution: Record<string, number>) => {
     const total = Object.values(timeDistribution).reduce((sum, count) => sum + count, 0)
     if (total === 0) return "데이터 없음"
-
     const percentages = Object.entries(timeDistribution)
       .map(([time, count]) => `${time} ${Math.round((count / total) * 100)}%`)
       .join(", ")
-
     return percentages
-  }
-
-  const generateNickname = (speaker: string, features: any, usedNicknames: Set<string>): string => {
-    let nickname = speaker
-    const traits: string[] = []
-
-    if (features.negativeCount >= 10 && features.negativeCount > features.positiveCount) {
-      nickname = `난폭왕${speaker}`
-      traits.push("과격파")
-    } else if (features.positiveCount >= 10 && features.positiveCount > features.negativeCount) {
-      nickname = `갓${speaker}`
-      traits.push("긍정왕")
-    }
-
-    if (features.questionCount > 5) traits.push("궁금이")
-    if (features.linkCount > 3) traits.push("링크수집가")
-    if (features.exclamationCount > 8) traits.push("표현대장")
-    if (features.averageMessageLength > 50) traits.push("디테일러")
-
-    const timeDistribution = features.timeDistribution
-    const maxTimeSlot = Object.entries(timeDistribution).reduce((a, b) => (a[1] > b[1] ? a : b))[0]
-    if (maxTimeSlot === "새벽") traits.push("올빼미")
-    else if (maxTimeSlot === "오전") traits.push("아침형")
-
-    const uniqueNickname = `${nickname}`
-    if (!usedNicknames.has(uniqueNickname)) {
-      usedNicknames.add(uniqueNickname)
-      return uniqueNickname
-    }
-
-    return nickname
-  }
-
-  const generateTraits = (features: any): string[] => {
-    const traits: string[] = []
-
-    if (features.negativeCount >= 10) traits.push("과격파")
-    if (features.positiveCount >= 10) traits.push("긍정왕")
-    if (features.questionCount > 5) traits.push("궁금이")
-    if (features.linkCount > 3) traits.push("링크수집가")
-    if (features.exclamationCount > 8) traits.push("표현대장")
-    if (features.averageMessageLength > 50) traits.push("디테일러")
-
-    const timeDistribution = features.timeDistribution
-    const maxTimeSlot = Object.entries(timeDistribution).reduce((a, b) => (a[1] > b[1] ? a : b))[0]
-    if (maxTimeSlot === "새벽") traits.push("올빼미")
-    else if (maxTimeSlot === "오전") traits.push("아침형")
-
-    return traits
   }
 
   return (
@@ -305,109 +436,35 @@ export default function VibeAnalysisPage() {
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="aggressiveness">과격함 민감도</Label>
-                  <span className="text-sm text-muted-foreground">{settings.aggressivenessSensitivity}%</span>
+              {[
+                ["aggressivenessSensitivity", "과격함 민감도"],
+                ["praiseSensitivity", "칭찬 민감도"],
+                ["questionSensitivity", "질문 민감도"],
+                ["emotionSensitivity", "감정표현 민감도"],
+                ["messageLengthSensitivity", "메시지길이 민감도"],
+                ["timePatternSensitivity", "시간패턴 민감도"],
+              ].map(([key, label]) => (
+                <div className="space-y-3" key={key}>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor={key}>{label}</Label>
+                    <span className="text-sm text-muted-foreground">
+                      {(settings as any)[key as keyof VibeSettings]}%
+                    </span>
+                  </div>
+                  <Slider
+                    id={key}
+                    min={0}
+                    max={100}
+                    step={10}
+                    value={[(settings as any)[key as keyof VibeSettings]]}
+                    onValueChange={([value]) => setSettings((prev) => ({ ...prev, [key]: value } as any))}
+                    className="w-full"
+                  />
                 </div>
-                <Slider
-                  id="aggressiveness"
-                  min={0}
-                  max={100}
-                  step={10}
-                  value={[settings.aggressivenessSensitivity]}
-                  onValueChange={([value]) => setSettings((prev) => ({ ...prev, aggressivenessSensitivity: value }))}
-                  className="w-full"
-                />
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="praise">칭찬 민감도</Label>
-                  <span className="text-sm text-muted-foreground">{settings.praiseSensitivity}%</span>
-                </div>
-                <Slider
-                  id="praise"
-                  min={0}
-                  max={100}
-                  step={10}
-                  value={[settings.praiseSensitivity]}
-                  onValueChange={([value]) => setSettings((prev) => ({ ...prev, praiseSensitivity: value }))}
-                  className="w-full"
-                />
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="question">질문 민감도</Label>
-                  <span className="text-sm text-muted-foreground">{settings.questionSensitivity}%</span>
-                </div>
-                <Slider
-                  id="question"
-                  min={0}
-                  max={100}
-                  step={10}
-                  value={[settings.questionSensitivity]}
-                  onValueChange={([value]) => setSettings((prev) => ({ ...prev, questionSensitivity: value }))}
-                  className="w-full"
-                />
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="emotion">감정표현 민감도</Label>
-                  <span className="text-sm text-muted-foreground">{settings.emotionSensitivity}%</span>
-                </div>
-                <Slider
-                  id="emotion"
-                  min={0}
-                  max={100}
-                  step={10}
-                  value={[settings.emotionSensitivity]}
-                  onValueChange={([value]) => setSettings((prev) => ({ ...prev, emotionSensitivity: value }))}
-                  className="w-full"
-                />
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="messageLength">메시지길이 민감도</Label>
-                  <span className="text-sm text-muted-foreground">{settings.messageLengthSensitivity}%</span>
-                </div>
-                <Slider
-                  id="messageLength"
-                  min={0}
-                  max={100}
-                  step={10}
-                  value={[settings.messageLengthSensitivity]}
-                  onValueChange={([value]) => setSettings((prev) => ({ ...prev, messageLengthSensitivity: value }))}
-                  className="w-full"
-                />
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="timePattern">시간패턴 민감도</Label>
-                  <span className="text-sm text-muted-foreground">{settings.timePatternSensitivity}%</span>
-                </div>
-                <Slider
-                  id="timePattern"
-                  min={0}
-                  max={100}
-                  step={10}
-                  value={[settings.timePatternSensitivity]}
-                  onValueChange={([value]) => setSettings((prev) => ({ ...prev, timePatternSensitivity: value }))}
-                  className="w-full"
-                />
-              </div>
+              ))}
             </div>
 
-            <Button
-              onClick={handleReanalyze}
-              disabled={!parseResult || isAnalyzing}
-              variant="outline"
-              className="w-full bg-transparent"
-            >
+            <Button onClick={handleReanalyze} disabled={!parseResult || isAnalyzing} variant="outline" className="w-full bg-transparent">
               <RefreshCw className="h-4 w-4 mr-2" />
               재분석하기
             </Button>
