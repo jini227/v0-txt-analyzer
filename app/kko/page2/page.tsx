@@ -172,22 +172,56 @@ export default function SpeakerWordsPage() {
   const handleCapture = async () => {
     try {
       const blob = await captureElement("analysis-results")
-      downloadImage(blob, `speaker_words_${new Date().toISOString().split("T")[0]}.png`)
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
+      downloadImage(blob, `kko-result-${timestamp}.png`)
     } catch (error) {
       console.error("캡처 오류:", error)
+      alert("이미지 캡처에 실패했습니다.")
     }
   }
 
   const handleKakaoShare = async () => {
-    alert(
-      "카카오톡 공유 기능을 사용하려면 Project Settings에서 카카오 JavaScript 키를 설정하고 카카오 SDK를 수동으로 로드해주세요.",
-    )
+    try {
+      const blob = await captureElement("analysis-results")
+      const formData = new FormData()
+      formData.append("image", blob, "analysis.png")
+
+      const response = await fetch("/api/share/upload", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) throw new Error("업로드 실패")
+
+      const { id, url } = await response.json()
+
+      if (typeof window !== "undefined" && window.Kakao) {
+        window.Kakao.Link.sendDefault({
+          objectType: "feed",
+          content: {
+            title: "What's in my Kakao 분석 결과",
+            description: "화자별 단어 분석 결과를 확인해보세요!",
+            imageUrl: url,
+            link: {
+              mobileWebUrl: window.location.href,
+              webUrl: window.location.href,
+            },
+          },
+        })
+      } else {
+        alert("카카오톡 SDK가 로드되지 않았습니다. 환경변수를 확인해주세요.")
+      }
+    } catch (error) {
+      console.error("공유 오류:", error)
+      alert("카카오톡 공유에 실패했습니다.")
+    }
   }
 
   const handleDownloadCSV = () => {
     if (analysis.length === 0) return
     const csv = generateWordAnalysisCSV(analysis)
-    downloadCSV(csv, `speaker_words_${new Date().toISOString().split("T")[0]}.csv`)
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
+    downloadCSV(csv, `kko-result-${timestamp}.csv`)
   }
 
   const filteredAnalysis = analysis.filter((speakerAnalysis) => {

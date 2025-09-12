@@ -12,9 +12,10 @@ import { Chips } from "@/components/ui/chips"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Separator } from "@/components/ui/separator"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
-import { FileText, Users, Sparkles, Brain, Settings } from "lucide-react"
+import { FileText, Users, Sparkles, Brain, Settings, Camera, Share2 } from "lucide-react"
 import { parseKakaoTxt } from "@/lib/parseKakao"
 import { analyzeVibe } from "@/lib/analysis"
+import { captureElement, downloadImage } from "@/lib/capture"
 import type { ParseResult } from "@/lib/parseKakao"
 import type { SpeakerVibeAnalysis } from "@/lib/analysis"
 
@@ -426,6 +427,54 @@ export default function VibeAnalysisPage() {
     return percentages
   }
 
+  const handleCapture = async () => {
+    try {
+      const blob = await captureElement("analysis-results")
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
+      downloadImage(blob, `kko-result-${timestamp}.png`)
+    } catch (error) {
+      console.error("캡처 오류:", error)
+      alert("이미지 캡처에 실패했습니다.")
+    }
+  }
+
+  const handleKakaoShare = async () => {
+    try {
+      const blob = await captureElement("analysis-results")
+      const formData = new FormData()
+      formData.append("image", blob, "analysis.png")
+
+      const response = await fetch("/api/share/upload", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) throw new Error("업로드 실패")
+
+      const { id, url } = await response.json()
+
+      if (typeof window !== "undefined" && window.Kakao) {
+        window.Kakao.Link.sendDefault({
+          objectType: "feed",
+          content: {
+            title: "What's in my Kakao 분석 결과",
+            description: "대화방 분위기 분석 결과를 확인해보세요!",
+            imageUrl: url,
+            link: {
+              mobileWebUrl: window.location.href,
+              webUrl: window.location.href,
+            },
+          },
+        })
+      } else {
+        alert("카카오톡 SDK가 로드되지 않았습니다. 환경변수를 확인해주세요.")
+      }
+    } catch (error) {
+      console.error("공유 오류:", error)
+      alert("카카오톡 공유에 실패했습니다.")
+    }
+  }
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <LoadingOverlay
@@ -434,17 +483,31 @@ export default function VibeAnalysisPage() {
       />
 
       <div className="mb-8">
-        <h1 className="text-2xl font-bold mb-2">대화방 분위기 & 별명</h1>
-        <p className="text-muted-foreground">
-          대화의 전반적인 분위기를 분석하고 참여자들의 특성에 따른 별명을 제안합니다.
-          {!useAI ? (
-            <Badge variant="secondary" className="mt-2">
-              AI 미사용 모드
-            </Badge>
-          ) : aiStatus === "ai" ? (
-            <Badge className="mt-2">AI 제안 반영</Badge>
-          ) : null}
-        </p>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+          <div>
+            <h1 className="text-2xl font-bold mb-2">대화방 분위기 & 별명</h1>
+            <p className="text-muted-foreground">
+              대화의 전반적인 분위기를 분석하고 참여자들의 특성에 따른 별명을 제안합니다.
+              {!useAI ? (
+                <Badge variant="secondary" className="mt-2">
+                  AI 미사용 모드
+                </Badge>
+              ) : aiStatus === "ai" ? (
+                <Badge className="mt-2">AI 제안 반영</Badge>
+              ) : null}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleCapture} disabled={speakerAnalyses.length === 0}>
+              <Camera className="h-4 w-4 mr-2" />
+              이미지 저장
+            </Button>
+            <Button variant="outline" onClick={handleKakaoShare} disabled={speakerAnalyses.length === 0}>
+              <Share2 className="h-4 w-4 mr-2" />
+              카카오톡 공유
+            </Button>
+          </div>
+        </div>
       </div>
 
       <Card>
@@ -536,7 +599,7 @@ export default function VibeAnalysisPage() {
       )}
 
       {roomSummary && speakerAnalyses.length > 0 && (
-        <div className="space-y-6">
+        <div id="analysis-results" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
