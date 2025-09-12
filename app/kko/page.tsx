@@ -1,5 +1,9 @@
+"use client"
+
 import Link from "next/link"
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { BarChart3, Users, Sparkles } from "lucide-react"
 
 const menuItems = [
@@ -27,8 +31,18 @@ const menuItems = [
 ]
 
 export default function KkoMenuPage() {
+  const [isLoading, setIsLoading] = useState(false)
+
+  const handlePageNavigation = () => {
+    setIsLoading(true)
+    // 페이지 이동 시 약간의 지연 후 로딩 해제 (Next.js 라우팅 완료 시점)
+    setTimeout(() => setIsLoading(false), 500)
+  }
+
   return (
     <div className="max-w-6xl mx-auto">
+      <LoadingOverlay isLoading={isLoading} message="페이지 이동 중..." />
+
       <div className="text-center mb-12">
         <h1 className="text-3xl font-bold text-balance mb-4">What's in my Kakao</h1>
         <p className="text-lg text-muted-foreground text-pretty max-w-2xl mx-auto">
@@ -41,7 +55,7 @@ export default function KkoMenuPage() {
         {menuItems.map((item) => {
           const IconComponent = item.icon
           return (
-            <Link key={item.href} href={item.href} className="group">
+            <Link key={item.href} href={item.href} className="group" onClick={handlePageNavigation}>
               <Card className="h-full transition-all duration-200 hover:shadow-lg hover:scale-[1.02] border-2 hover:border-primary/20">
                 <CardHeader className="pb-4">
                   <div className="flex items-center gap-3 mb-2">

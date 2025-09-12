@@ -13,6 +13,7 @@ import { Chips } from "@/components/ui/chips"
 import { DataTable } from "@/components/ui/data-table"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Badge } from "@/components/ui/badge"
+import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { Download, FileText, Users, ChevronDown, ChevronRight, Camera, Share2, Crown, Medal, Award } from "lucide-react"
 import { parseKakaoTxt } from "@/lib/parseKakao"
 import { analyzeWords } from "@/lib/analysis"
@@ -37,6 +38,7 @@ export default function SpeakerWordsPage() {
   const [includedSpeakers, setIncludedSpeakers] = useState<string[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [showDetailedLog, setShowDetailedLog] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedSpeaker, setSelectedSpeaker] = useState<string>("all")
@@ -82,37 +84,42 @@ export default function SpeakerWordsPage() {
   const handleAnalyze = () => {
     if (!parseResult) return
 
-    const filteredMessages = parseResult.messages.filter((msg) => includedSpeakers.includes(msg.speaker))
+    setIsAnalyzing(true)
 
-    const wordAnalysis = analyzeWords(filteredMessages)
-    setAnalysis(wordAnalysis)
+    setTimeout(() => {
+      const filteredMessages = parseResult.messages.filter((msg) => includedSpeakers.includes(msg.speaker))
 
-    const wordMap = new Map<string, { speaker: string; count: number }[]>()
+      const wordAnalysis = analyzeWords(filteredMessages)
+      setAnalysis(wordAnalysis)
 
-    wordAnalysis.forEach((speakerAnalysis) => {
-      speakerAnalysis.topWords.forEach((wordCount) => {
-        if (!wordMap.has(wordCount.word)) {
-          wordMap.set(wordCount.word, [])
-        }
-        wordMap.get(wordCount.word)!.push({
-          speaker: speakerAnalysis.speaker,
-          count: wordCount.count,
+      const wordMap = new Map<string, { speaker: string; count: number }[]>()
+
+      wordAnalysis.forEach((speakerAnalysis) => {
+        speakerAnalysis.topWords.forEach((wordCount) => {
+          if (!wordMap.has(wordCount.word)) {
+            wordMap.set(wordCount.word, [])
+          }
+          wordMap.get(wordCount.word)!.push({
+            speaker: speakerAnalysis.speaker,
+            count: wordCount.count,
+          })
         })
       })
-    })
 
-    const globalRanking: GlobalWordRank[] = []
-    wordMap.forEach((speakers, word) => {
-      const sortedSpeakers = speakers.sort((a, b) => b.count - a.count)
-      globalRanking.push({
-        word,
-        topSpeaker: sortedSpeakers[0].speaker,
-        topCount: sortedSpeakers[0].count,
-        allSpeakers: sortedSpeakers,
+      const globalRanking: GlobalWordRank[] = []
+      wordMap.forEach((speakers, word) => {
+        const sortedSpeakers = speakers.sort((a, b) => b.count - a.count)
+        globalRanking.push({
+          word,
+          topSpeaker: sortedSpeakers[0].speaker,
+          topCount: sortedSpeakers[0].count,
+          allSpeakers: sortedSpeakers,
+        })
       })
-    })
 
-    setGlobalRanks(globalRanking)
+      setGlobalRanks(globalRanking)
+      setIsAnalyzing(false)
+    }, 1000) // 분석 시뮬레이션
   }
 
   const handleSpeakerRemove = (speaker: string) => {
@@ -198,6 +205,11 @@ export default function SpeakerWordsPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      <LoadingOverlay
+        isLoading={isProcessing || isAnalyzing}
+        message={isProcessing ? "파일 분석 중..." : "단어 분석 중..."}
+      />
+
       <div className="mb-8">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
           <div>
@@ -241,8 +253,8 @@ export default function SpeakerWordsPage() {
           )}
 
           <div className="flex flex-col sm:flex-row gap-4">
-            <Button onClick={handleAnalyze} disabled={!parseResult} className="flex-1">
-              분석하기
+            <Button onClick={handleAnalyze} disabled={!parseResult || isAnalyzing} className="flex-1">
+              {isAnalyzing ? "분석 중..." : "분석하기"}
             </Button>
             <div className="flex items-center space-x-2">
               <Switch id="detailed-log" checked={showDetailedLog} onCheckedChange={setShowDetailedLog} />

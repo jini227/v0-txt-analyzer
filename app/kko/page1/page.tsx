@@ -19,6 +19,7 @@ import { analyzeKeyword } from "@/lib/analysis"
 import { generateKeywordSummaryCSV, generateKeywordDetailsCSV, downloadCSV } from "@/lib/csv"
 import type { ParseResult } from "@/lib/parseKakao"
 import type { KeywordAnalysis } from "@/lib/analysis"
+import { LoadingOverlay } from "@/components/ui/loading-overlay"
 
 export default function KeywordCounterPage() {
   const [file, setFile] = useState<File | null>(null)
@@ -28,6 +29,7 @@ export default function KeywordCounterPage() {
   const [includedSpeakers, setIncludedSpeakers] = useState<string[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
 
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile)
@@ -64,8 +66,13 @@ export default function KeywordCounterPage() {
   const handleAnalyze = () => {
     if (!parseResult || !keyword.trim()) return
 
-    const result = analyzeKeyword(parseResult.messages, keyword.trim(), includedSpeakers)
-    setAnalysis(result)
+    setIsAnalyzing(true)
+
+    setTimeout(() => {
+      const result = analyzeKeyword(parseResult.messages, keyword.trim(), includedSpeakers)
+      setAnalysis(result)
+      setIsAnalyzing(false)
+    }, 1000) // 분석 시뮬레이션
   }
 
   const handleSpeakerRemove = (speaker: string) => {
@@ -147,6 +154,11 @@ export default function KeywordCounterPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      <LoadingOverlay
+        isLoading={isProcessing || isAnalyzing}
+        message={isProcessing ? "파일 분석 중..." : "키워드 분석 중..."}
+      />
+
       <div className="mb-8">
         <h1 className="text-2xl font-bold mb-2">키워드 카운터</h1>
         <p className="text-muted-foreground">카카오톡 대화에서 특정 키워드의 사용 빈도를 분석하고 시각화합니다.</p>
@@ -186,8 +198,12 @@ export default function KeywordCounterPage() {
               />
             </div>
             <div className="flex items-end">
-              <Button onClick={handleAnalyze} disabled={!parseResult || !keyword.trim()} className="w-full">
-                분석하기
+              <Button
+                onClick={handleAnalyze}
+                disabled={!parseResult || !keyword.trim() || isAnalyzing}
+                className="w-full"
+              >
+                {isAnalyzing ? "분석 중..." : "분석하기"}
               </Button>
             </div>
           </div>

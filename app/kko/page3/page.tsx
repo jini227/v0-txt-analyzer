@@ -11,7 +11,8 @@ import { FileDropzone } from "@/components/ui/file-dropzone"
 import { Chips } from "@/components/ui/chips"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Separator } from "@/components/ui/separator"
-import { FileText, Users, Sparkles, Brain, Settings, RefreshCw } from "lucide-react"
+import { LoadingOverlay } from "@/components/ui/loading-overlay"
+import { FileText, Users, Sparkles, Brain, Settings } from "lucide-react"
 import { parseKakaoTxt } from "@/lib/parseKakao"
 import { analyzeVibe } from "@/lib/analysis"
 import type { ParseResult } from "@/lib/parseKakao"
@@ -31,7 +32,7 @@ interface VibeSettings {
 type Feature = {
   positiveCount: number
   negativeCount: number
-  swearCount: number 
+  swearCount: number
   questionCount: number
   linkCount: number
   exclamationCount: number
@@ -148,21 +149,40 @@ function chooseNicknameBase(
   usedKingHeads: Set<string>,
 ) {
   const list = nicknameSynonyms[primaryKey] ?? []
-  for (const b of list) if (!isKing(b) && !usedBases.has(b)) { usedBases.add(b); return b }
+  for (const b of list)
+    if (!isKing(b) && !usedBases.has(b)) {
+      usedBases.add(b)
+      return b
+    }
   for (const b of list) {
     if (isKing(b) && !usedBases.has(b) && !usedKingHeads.has(kingHead(b))) {
-      usedBases.add(b); usedKingHeads.add(kingHead(b)); return b
+      usedBases.add(b)
+      usedKingHeads.add(kingHead(b))
+      return b
     }
   }
   if (secondaryKey) {
-    const a = (nicknameSynonyms[primaryKey] || []).find(x => !isKing(x)) || (nicknameSynonyms[primaryKey] || [primaryKey])[0]
-    const c = (nicknameSynonyms[secondaryKey] || []).find(x => !isKing(x)) || (nicknameSynonyms[secondaryKey] || [secondaryKey])[0]
+    const a =
+      (nicknameSynonyms[primaryKey] || []).find((x) => !isKing(x)) || (nicknameSynonyms[primaryKey] || [primaryKey])[0]
+    const c =
+      (nicknameSynonyms[secondaryKey] || []).find((x) => !isKing(x)) ||
+      (nicknameSynonyms[secondaryKey] || [secondaryKey])[0]
     const hybrid = `${a}-${c}`
-    if (!usedBases.has(hybrid)) { usedBases.add(hybrid); return hybrid }
+    if (!usedBases.has(hybrid)) {
+      usedBases.add(hybrid)
+      return hybrid
+    }
   }
   const seed = (nicknameSynonyms[primaryKey] || [primaryKey])[0]
-  for (const t of ["에이스","리드","마스터"]) { const v = `${seed}${t}`; if (!usedBases.has(v)) { usedBases.add(v); return v } }
-  usedBases.add(seed); return seed
+  for (const t of ["에이스", "리드", "마스터"]) {
+    const v = `${seed}${t}`
+    if (!usedBases.has(v)) {
+      usedBases.add(v)
+      return v
+    }
+  }
+  usedBases.add(seed)
+  return seed
 }
 
 // -------------------- 별명/특성 생성(슬라이더 반영) --------------------
@@ -186,10 +206,14 @@ function makeNicknameAndTraits(
   for (const [k, v] of ordered.slice(1)) {
     if (v < 0.33) continue
     const candidates = traitSynonyms[k] ?? [k]
-    let best = candidates[0], bestCnt = traitUsageCount.get(best) ?? 0
+    let best = candidates[0],
+      bestCnt = traitUsageCount.get(best) ?? 0
     for (const c of candidates) {
       const cnt = traitUsageCount.get(c) ?? 0
-      if (cnt < bestCnt) { best = c; bestCnt = cnt }
+      if (cnt < bestCnt) {
+        best = c
+        bestCnt = cnt
+      }
     }
     if (!traits.includes(best)) {
       traits.push(best)
@@ -199,7 +223,8 @@ function makeNicknameAndTraits(
   }
   if (traits.length === 0 && ordered[1]) {
     const t = (traitSynonyms[ordered[1][0]] ?? [ordered[1][0]])[0]
-    traits.push(t); traitUsageCount.set(t, (traitUsageCount.get(t) ?? 0) + 1)
+    traits.push(t)
+    traitUsageCount.set(t, (traitUsageCount.get(t) ?? 0) + 1)
   }
   return { nickname, traits }
 }
@@ -207,7 +232,13 @@ function makeNicknameAndTraits(
 // -------------------- AI 제안(오버레이) 타입/머지 --------------------
 type AiPayload = {
   roomSummary?: string
-  speakerAnalyses?: { speaker: string; nickname?: string; traits?: string[]; analysis?: string; featureSummary?: string }[]
+  speakerAnalyses?: {
+    speaker: string
+    nickname?: string
+    traits?: string[]
+    analysis?: string
+    featureSummary?: string
+  }[]
 }
 const validateAI = (j: any): j is AiPayload =>
   j && Array.isArray(j.speakerAnalyses) && j.speakerAnalyses.every((x: any) => typeof x?.speaker === "string")
@@ -216,17 +247,15 @@ const uniqMerge = (a: string[] = [], b: string[] = []) => Array.from(new Set([..
 // 휴리스틱 features/카운터는 보존, AI가 준 텍스트 정보만 얹기
 const mergeHeuristicWithAI = (heuristics: SpeakerVibeAnalysis[], ai: AiPayload | null): SpeakerVibeAnalysis[] => {
   if (!ai || !validateAI(ai)) return heuristics
-  return heuristics.map(h => {
-    const m = ai.speakerAnalyses?.find(x => x.speaker === h.speaker)
+  return heuristics.map((h) => {
+    const m = ai.speakerAnalyses?.find((x) => x.speaker === h.speaker)
     if (!m) return h
     return {
       ...h,
       nickname: m.nickname ?? h.nickname,
       traits: m.traits ? uniqMerge(h.traits ?? [], m.traits) : h.traits,
       featureSummary: m.featureSummary ?? h.featureSummary,
-      evidenceSnippets: m.analysis
-        ? uniqMerge(h.evidenceSnippets ?? [], [m.analysis])
-        : (h.evidenceSnippets ?? []),
+      evidenceSnippets: m.analysis ? uniqMerge(h.evidenceSnippets ?? [], [m.analysis]) : (h.evidenceSnippets ?? []),
     }
   })
 }
@@ -357,7 +386,9 @@ export default function VibeAnalysisPage() {
 
       // 2) AI가 켜져 있으면 제안 받아서 텍스트 정보만 덮어쓰기
       if (useAI) {
-        const ai = await enhanceWithAI(filteredMessages, includedSpeakers, settings, { speakerAnalyses: adjustedAnalyses })
+        const ai = await enhanceWithAI(filteredMessages, includedSpeakers, settings, {
+          speakerAnalyses: adjustedAnalyses,
+        })
         if (ai) {
           setRoomSummary(ai.roomSummary ?? heuristicResult.roomSummary)
           setSpeakerAnalyses(mergeHeuristicWithAI(adjustedAnalyses, ai))
@@ -397,15 +428,22 @@ export default function VibeAnalysisPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      <LoadingOverlay
+        isLoading={isProcessing || isAnalyzing}
+        message={isProcessing ? "파일 분석 중..." : useAI ? "AI 분석 중..." : "분위기 분석 중..."}
+      />
+
       <div className="mb-8">
         <h1 className="text-2xl font-bold mb-2">대화방 분위기 & 별명</h1>
         <p className="text-muted-foreground">
-          대화의 전반적인 분위기를 분석하고 참여자들의 특성에 따른 별명을 제안합니다. 
-        {!useAI ? (
-          <Badge variant="secondary" className="mt-2">AI 미사용 모드</Badge>
-        ) : aiStatus === "ai" ? (
-          <Badge className="mt-2">AI 제안 반영</Badge>
-        ) : null}
+          대화의 전반적인 분위기를 분석하고 참여자들의 특성에 따른 별명을 제안합니다.
+          {!useAI ? (
+            <Badge variant="secondary" className="mt-2">
+              AI 미사용 모드
+            </Badge>
+          ) : aiStatus === "ai" ? (
+            <Badge className="mt-2">AI 제안 반영</Badge>
+          ) : null}
         </p>
       </div>
 
@@ -431,7 +469,7 @@ export default function VibeAnalysisPage() {
           )}
 
           <Button onClick={handleAnalyze} disabled={!parseResult || isAnalyzing} className="w-full">
-            {isAnalyzing ? "분석 중..." : "분위기 분석하기"}
+            {isAnalyzing ? (useAI ? "AI 분석 중..." : "분석 중...") : "분위기 분석하기"}
           </Button>
         </CardContent>
       </Card>
@@ -528,11 +566,7 @@ export default function VibeAnalysisPage() {
                       ))}
                     </div>
                   </div>
-                  {analysis.featureSummary && (
-                    <span className="font-bold text-lg">
-                        {analysis.featureSummary}
-                    </span>
-                  )}
+                  {analysis.featureSummary && <span className="font-bold text-lg">{analysis.featureSummary}</span>}
                   {analysis.evidenceSnippets.length > 0 && (
                     <div>
                       {/* <h4 className="font-medium mb-2">대표 메시지</h4> */}
@@ -572,7 +606,10 @@ export default function VibeAnalysisPage() {
                     <div>
                       <h4 className="font-medium mb-2">메시지 특성</h4>
                       <ul className="space-y-1 text-muted-foreground">
-                        <li>평균 메시지 길이: {analysis.features.averageMessageLength}자 / 감탄문: {analysis.features.exclamationCount}개</li>
+                        <li>
+                          평균 메시지 길이: {analysis.features.averageMessageLength}자 / 감탄문:{" "}
+                          {analysis.features.exclamationCount}개
+                        </li>
                       </ul>
                     </div>
                     <div>
