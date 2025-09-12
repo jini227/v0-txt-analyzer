@@ -8,11 +8,11 @@ export function Header() {
   const pathname = usePathname()
 
   const getBreadcrumb = () => {
-    if (pathname === "/kko" || pathname === "/kko/") return "KKO Analyzer"
-    if (pathname === "/kko/page1" || pathname === "/kko/page1/") return "KKO Analyzer > 키워드 카운터"
-    if (pathname === "/kko/page2" || pathname === "/kko/page2/") return "KKO Analyzer > 화자별 Top 단어"
-    if (pathname === "/kko/page3" || pathname === "/kko/page3/") return "KKO Analyzer > 대화방 분위기 & 별명"
-    return "KKO Analyzer"
+    if (pathname === "/kko" || pathname === "/kko/") return "What's in my Kakao"
+    if (pathname === "/kko/page1" || pathname === "/kko/page1/") return "What's in my Kakao > 키워드 카운터"
+    if (pathname === "/kko/page2" || pathname === "/kko/page2/") return "What's in my Kakao > 화자별 Top 단어"
+    if (pathname === "/kko/page3" || pathname === "/kko/page3/") return "What's in my Kakao > 대화방 분위기 & 별명"
+    return "What's in my Kakao"
   }
 
   const isMenuPage = pathname === "/kko" || pathname === "/kko/"

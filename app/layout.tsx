@@ -7,7 +7,7 @@ import { Suspense } from "react"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "KKO Analyzer - 카카오톡 대화 분석기",
+  title: "What's in my Kakao - 카카오톡 대화 분석기",
   description: "카카오톡 대화를 분석하여 키워드, 화자별 단어, 대화 분위기를 파악하는 도구",
   generator: "v0.app",
 }

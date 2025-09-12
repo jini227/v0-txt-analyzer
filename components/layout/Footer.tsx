@@ -4,7 +4,7 @@ export function Footer() {
       <div className="container mx-auto px-4 py-6">
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
-            <span>KKO Analyzer v1.0</span>
+            <span>What's in my Kakao v1.0</span>
             <span>•</span>
             <span>Built with Next.js</span>
           </div>

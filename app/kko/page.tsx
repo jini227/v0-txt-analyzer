@@ -30,7 +30,7 @@ export default function KkoMenuPage() {
   return (
     <div className="max-w-6xl mx-auto">
       <div className="text-center mb-12">
-        <h1 className="text-3xl font-bold text-balance mb-4">KKO Analyzer</h1>
+        <h1 className="text-3xl font-bold text-balance mb-4">What's in my Kakao</h1>
         <p className="text-lg text-muted-foreground text-pretty max-w-2xl mx-auto">
           카카오톡 대화 파일을 업로드하여 키워드 분석, 화자별 단어 분석, 대화 분위기 분석을 수행할 수 있습니다. 모든
           분석은 브라우저에서만 처리되어 개인정보가 안전하게 보호됩니다.
