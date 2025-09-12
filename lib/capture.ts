@@ -10,8 +10,26 @@ export async function captureElement(elementId: string): Promise<Blob> {
     backgroundColor: "#ffffff",
     scale: 2, // 고해상도
     useCORS: true,
-    allowTaint: false,
+    allowTaint: true, // oklch 색상 허용
     logging: false,
+    ignoreElements: (element) => {
+      // oklch를 사용하는 요소들을 무시하거나 처리
+      const computedStyle = window.getComputedStyle(element)
+      return computedStyle.color?.includes("oklch") || computedStyle.backgroundColor?.includes("oklch")
+    },
+    onclone: (clonedDoc) => {
+      // 클론된 문서에서 oklch 색상을 rgb로 변환
+      const allElements = clonedDoc.querySelectorAll("*")
+      allElements.forEach((el) => {
+        const style = el.style
+        if (style.color?.includes("oklch")) {
+          style.color = "#000000" // 기본 검은색으로 변경
+        }
+        if (style.backgroundColor?.includes("oklch")) {
+          style.backgroundColor = "#ffffff" // 기본 흰색으로 변경
+        }
+      })
+    },
   })
 
   return new Promise((resolve) => {
