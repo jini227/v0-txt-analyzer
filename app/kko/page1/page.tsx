@@ -17,7 +17,7 @@ import { Download, FileText, Calendar, Users, TrendingUp, Camera, Share2 } from 
 import { parseKakaoTxt, getDaysSinceStart, formatKoreanDate } from "@/lib/parseKakao"
 import { analyzeKeyword } from "@/lib/analysis"
 import { generateKeywordSummaryCSV, generateKeywordDetailsCSV, downloadCSV } from "@/lib/csv"
-import { captureElement, downloadImage } from "@/lib/capture"
+import { captureAndSave, captureAndKakaoShare } from "@/lib/capture"
 import type { ParseResult } from "@/lib/parseKakao"
 import type { KeywordAnalysis } from "@/lib/analysis"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
@@ -124,52 +124,24 @@ export default function KeywordCounterPage() {
     URL.revokeObjectURL(url)
   }
 
-  const handleCapture = async () => {
-    try {
-      const blob = await captureElement("analysis-results")
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
-      downloadImage(blob, `kko-result-${timestamp}.png`)
-    } catch (error) {
-      console.error("캡처 오류:", error)
-      alert("이미지 캡처에 실패했습니다.")
-    }
-  }
-
   const handleKakaoShare = async () => {
-    try {
-      const blob = await captureElement("analysis-results")
-      const formData = new FormData()
-      formData.append("image", blob, "analysis.png")
-
-      const response = await fetch("/api/share/upload", {
-        method: "POST",
-        body: formData,
-      })
-
-      if (!response.ok) throw new Error("업로드 실패")
-
-      const { id, url } = await response.json()
-
-      if (typeof window !== "undefined" && window.Kakao) {
-        window.Kakao.Link.sendDefault({
-          objectType: "feed",
-          content: {
-            title: "What's in my Kakao 분석 결과",
-            description: "키워드 분석 결과를 확인해보세요!",
-            imageUrl: url,
-            link: {
-              mobileWebUrl: window.location.href,
-              webUrl: window.location.href,
-            },
-          },
-        })
-      } else {
-        alert("카카오톡 SDK가 로드되지 않았습니다. 환경변수를 확인해주세요.")
+    await captureAndKakaoShare(
+      "analysis-results",
+      async (dataUrl: string) => {
+        const blob = await (await fetch(dataUrl)).blob()
+        const formData = new FormData()
+        formData.append("image", blob, "analysis.png")
+        const res = await fetch("/api/share/upload", { method: "POST", body: formData })
+        if (!res.ok) throw new Error("업로드 실패")
+        const { url } = await res.json()
+        return url as string
+      },
+      {
+        title: "What's in my Kakao 분석 결과",
+        description: "키워드 분석 결과를 확인해보세요!",
+        linkUrl: typeof window !== "undefined" ? window.location.href : undefined,
       }
-    } catch (error) {
-      console.error("공유 오류:", error)
-      alert("카카오톡 공유에 실패했습니다.")
-    }
+    )
   }
 
   // 차트 데이터 준비
@@ -215,10 +187,11 @@ export default function KeywordCounterPage() {
             <p className="text-muted-foreground">카카오톡 대화에서 특정 키워드의 사용 빈도를 분석하고 시각화합니다.</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={handleCapture} disabled={!analysis}>
+            <Button variant="outline" onClick={() => captureAndSave("analysis-results")} disabled={!analysis}>
               <Camera className="h-4 w-4 mr-2" />
               이미지 저장
             </Button>
+
             <Button variant="outline" onClick={handleKakaoShare} disabled={!analysis}>
               <Share2 className="h-4 w-4 mr-2" />
               카카오톡 공유

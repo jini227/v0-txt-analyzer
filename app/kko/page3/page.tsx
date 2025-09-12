@@ -15,7 +15,7 @@ import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { FileText, Users, Sparkles, Brain, Settings, Camera, Share2 } from "lucide-react"
 import { parseKakaoTxt } from "@/lib/parseKakao"
 import { analyzeVibe } from "@/lib/analysis"
-import { captureElement, downloadImage } from "@/lib/capture"
+import { captureAndSave, captureAndKakaoShare } from "@/lib/capture"
 import type { ParseResult } from "@/lib/parseKakao"
 import type { SpeakerVibeAnalysis } from "@/lib/analysis"
 
@@ -427,52 +427,24 @@ export default function VibeAnalysisPage() {
     return percentages
   }
 
-  const handleCapture = async () => {
-    try {
-      const blob = await captureElement("analysis-results")
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
-      downloadImage(blob, `kko-result-${timestamp}.png`)
-    } catch (error) {
-      console.error("캡처 오류:", error)
-      alert("이미지 캡처에 실패했습니다.")
-    }
-  }
-
   const handleKakaoShare = async () => {
-    try {
-      const blob = await captureElement("analysis-results")
-      const formData = new FormData()
-      formData.append("image", blob, "analysis.png")
-
-      const response = await fetch("/api/share/upload", {
-        method: "POST",
-        body: formData,
-      })
-
-      if (!response.ok) throw new Error("업로드 실패")
-
-      const { id, url } = await response.json()
-
-      if (typeof window !== "undefined" && window.Kakao) {
-        window.Kakao.Link.sendDefault({
-          objectType: "feed",
-          content: {
-            title: "What's in my Kakao 분석 결과",
-            description: "대화방 분위기 분석 결과를 확인해보세요!",
-            imageUrl: url,
-            link: {
-              mobileWebUrl: window.location.href,
-              webUrl: window.location.href,
-            },
-          },
-        })
-      } else {
-        alert("카카오톡 SDK가 로드되지 않았습니다. 환경변수를 확인해주세요.")
+    await captureAndKakaoShare(
+      "analysis-results",
+      async (dataUrl: string) => {
+        const blob = await (await fetch(dataUrl)).blob()
+        const formData = new FormData()
+        formData.append("image", blob, "analysis.png")
+        const res = await fetch("/api/share/upload", { method: "POST", body: formData })
+        if (!res.ok) throw new Error("업로드 실패")
+        const { url } = await res.json()
+        return url as string
+      },
+      {
+        title: "What's in my Kakao 분석 결과",
+        description: "키워드 분석 결과를 확인해보세요!",
+        linkUrl: typeof window !== "undefined" ? window.location.href : undefined,
       }
-    } catch (error) {
-      console.error("공유 오류:", error)
-      alert("카카오톡 공유에 실패했습니다.")
-    }
+    )
   }
 
   return (
@@ -498,10 +470,11 @@ export default function VibeAnalysisPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={handleCapture} disabled={speakerAnalyses.length === 0}>
+            <Button variant="outline" onClick={() => captureAndSave("analysis-results")} disabled={speakerAnalyses.length === 0}>
               <Camera className="h-4 w-4 mr-2" />
               이미지 저장
             </Button>
+
             <Button variant="outline" onClick={handleKakaoShare} disabled={speakerAnalyses.length === 0}>
               <Share2 className="h-4 w-4 mr-2" />
               카카오톡 공유
