@@ -16,12 +16,19 @@ export type SpeakerVibeAnalysis = {
   evidenceSnippets: string[]
   nickname?: string
   traits?: string[]
+  featureSummary?: string // 이 줄 추가!
 }
 
 type Msg = { speaker: string; text: string; timestamp?: string | number | Date }
 
-const positiveWords = ["좋다","굿","고마워","감사","최고","행복","대박","멋져","예쁘","웃겨","사랑"]
-const negativeWords = ["싫다","별로","최악","짜증","빡","화나","불편","나쁘","개같","힘들","미친"]
+const positiveWords = [
+  "좋다","좋아요","즐거웠다","굿","고마워","감사","최고","행복","대박",
+  "멋져","예쁘","웃겨","사랑","맛있어요","귀여운","축하","화이팅","멋있","짱","짱이야","짱이다","쩐다","쩔어"
+]
+const negativeWords = [
+  "싫다","안좋아","별로","최악","짜증","빡","화나","불편","나쁘","개같","짱짱","킹받","킹받네",
+  "힘들","미친","죽어","답답","속상해요","짜증나","화나요","불편해","나빠요"
+]
 
 function countContains(text: string, dict: string[]) {
   let c = 0
@@ -48,7 +55,7 @@ export function analyzeVibe(messages: Msg[]): {
   }
 
   const speakerAnalyses: SpeakerVibeAnalysis[] = Object.entries(bySpeaker).map(([speaker, msgs]) => {
-    let pos = 0, neg = 0, q = 0, link = 0, bang = 0, lenSum = 0
+    let pos = 0, neg = 0, q = 0, link = 0, bang = 0, lenSum = 0, sw = 0
     const timeDist: Feature["timeDistribution"] = { 오전: 0, 오후: 0, 저녁: 0, 새벽: 0 }
     const evid: string[] = []
 
@@ -92,3 +99,37 @@ export function analyzeVibe(messages: Msg[]): {
 
   return { roomSummary, speakerAnalyses }
 }
+
+type AiPayload = {
+  roomSummary?: string
+  speakerAnalyses?: {
+    speaker: string
+    nickname?: string
+    traits?: string[]
+    featureSummary?: string // 추가
+    analysis?: string
+  }[]
+}
+
+const mergeHeuristicWithAI = (heuristics: SpeakerVibeAnalysis[], ai: AiPayload | null): SpeakerVibeAnalysis[] => {
+  if (!ai || !validateAI(ai)) return heuristics
+  return heuristics.map(h => {
+    const m = ai.speakerAnalyses?.find(x => x.speaker === h.speaker)
+    if (!m) return h
+    return {
+      ...h,
+      nickname: m.nickname ?? h.nickname,
+      traits: m.traits ? uniqMerge(h.traits ?? [], m.traits) : h.traits,
+      featureSummary: m.featureSummary ?? h.featureSummary,
+      evidenceSnippets: m.analysis
+        ? uniqMerge(h.evidenceSnippets ?? [], [m.analysis])
+        : (h.evidenceSnippets ?? []),
+      // features는 그대로 유지!
+    }
+  })
+}
+
+const validateAI = (j: any): j is AiPayload =>
+  j && Array.isArray(j.speakerAnalyses) && j.speakerAnalyses.every((x: any) => typeof x?.speaker === "string")
+
+const uniqMerge = (a: string[] = [], b: string[] = []) => Array.from(new Set([...a, ...b]))

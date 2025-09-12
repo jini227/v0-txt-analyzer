@@ -51,6 +51,7 @@ export interface SpeakerVibeAnalysis {
   traits: string[]
   features: SpeakerFeatures
   evidenceSnippets: string[]
+  featureSummary?: string // 추가
 }
 
 export interface SpeakerFeatures {
@@ -291,9 +292,10 @@ export function analyzeVibe(messages: ParsedMessage[]): {
     speakerAnalyses.push({
       speaker,
       nickname,
-      traits: traits.slice(0, 3), // 최대 3개
+      traits: traits.slice(0, 3),
       features,
-      evidenceSnippets: [], // 실제 구현에서는 대표적인 메시지들을 추출
+      evidenceSnippets: [],
+      featureSummary: `${nickname} — ${traits.slice(0, 3).join(", ")} 스타일`, // 예시 요약
     })
   }
 

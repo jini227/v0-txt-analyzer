@@ -70,7 +70,6 @@ function baseBucketScores(f: Feature) {
 
 // 2) 슬라이더 가중/바이어스 강하게 적용
 function applySettingsWeights(base: Record<string, number>, settings: VibeSettings) {
-  // 0.25~4배 가중, -0.25~+0.25 바이어스
   const w = {
     난폭: scale(settings.aggressivenessSensitivity, 0.25, 4.0),
     긍정: scale(settings.praiseSensitivity, 0.25, 4.0),
@@ -97,14 +96,12 @@ function applySettingsWeights(base: Record<string, number>, settings: VibeSettin
     out[k] = clamp01(base[k] * (w as any)[k] + (b as any)[k])
   }
 
-  // 극단값 부스트
   if (settings.aggressivenessSensitivity >= 90 && base["난폭"] > 0.05) out["난폭"] = clamp01(out["난폭"] + 0.15)
   if (settings.praiseSensitivity >= 90 && base["긍정"] > 0.05) out["긍정"] = clamp01(out["긍정"] + 0.15)
   if (settings.questionSensitivity >= 90 && base["궁금"] > 0.05) out["궁금"] = clamp01(out["궁금"] + 0.12)
   if (settings.emotionSensitivity >= 90 && base["감탄"] > 0.05) out["감탄"] = clamp01(out["감탄"] + 0.12)
   if (settings.messageLengthSensitivity >= 90 && base["수다"] > 0.05) out["수다"] = clamp01(out["수다"] + 0.12)
 
-  // 대비(감마)로 순위 차 더 벌리기
   const gamma = 0.65
   for (const k of Object.keys(out)) out[k] = contrast(out[k], gamma)
 
@@ -121,7 +118,6 @@ function finalBucketScores(f: Feature, settings: VibeSettings) {
 const nicknameSynonyms: Record<string, string[]> = {
   난폭: ["직설가", "스트레이트", "확신러", "난폭왕"],
   긍정: ["해피메이커", "햇살러", "무드업", "갓"],
-  // ‘호기심천국’은 후순위로
   궁금: ["질문요정", "왜맨", "호기심러", "탐구왕", "호기심천국"],
   링크: ["링크수집가", "정보브로커", "링크러", "자료왕"],
   감탄: ["리액션장인", "표현대장", "감탄머신", "리액션봇"],
@@ -151,48 +147,21 @@ function chooseNicknameBase(
   usedKingHeads: Set<string>,
 ) {
   const list = nicknameSynonyms[primaryKey] ?? []
-
-  // 1) 비-왕 & 미사용
-  for (const b of list)
-    if (!isKing(b) && !usedBases.has(b)) {
-      usedBases.add(b)
-      return b
-    }
-
-  // 2) 왕 & 미사용 & 헤드 미사용
+  for (const b of list) if (!isKing(b) && !usedBases.has(b)) { usedBases.add(b); return b }
   for (const b of list) {
     if (isKing(b) && !usedBases.has(b) && !usedKingHeads.has(kingHead(b))) {
-      usedBases.add(b)
-      usedKingHeads.add(kingHead(b))
-      return b
+      usedBases.add(b); usedKingHeads.add(kingHead(b)); return b
     }
   }
-
-  // 3) 동의어 소진 시 하이브리드
   if (secondaryKey) {
-    const a =
-      (nicknameSynonyms[primaryKey] || []).find((x) => !isKing(x)) || (nicknameSynonyms[primaryKey] || [primaryKey])[0]
-    const b =
-      (nicknameSynonyms[secondaryKey] || []).find((x) => !isKing(x)) ||
-      (nicknameSynonyms[secondaryKey] || [secondaryKey])[0]
-    const hybrid = `${a}-${b}`
-    if (!usedBases.has(hybrid)) {
-      usedBases.add(hybrid)
-      return hybrid
-    }
+    const a = (nicknameSynonyms[primaryKey] || []).find(x => !isKing(x)) || (nicknameSynonyms[primaryKey] || [primaryKey])[0]
+    const c = (nicknameSynonyms[secondaryKey] || []).find(x => !isKing(x)) || (nicknameSynonyms[secondaryKey] || [secondaryKey])[0]
+    const hybrid = `${a}-${c}`
+    if (!usedBases.has(hybrid)) { usedBases.add(hybrid); return hybrid }
   }
-
-  // 4) 최후: 자연 접미어
   const seed = (nicknameSynonyms[primaryKey] || [primaryKey])[0]
-  for (const t of ["에이스", "리드", "마스터"]) {
-    const v = `${seed}${t}`
-    if (!usedBases.has(v)) {
-      usedBases.add(v)
-      return v
-    }
-  }
-  usedBases.add(seed)
-  return seed
+  for (const t of ["에이스","리드","마스터"]) { const v = `${seed}${t}`; if (!usedBases.has(v)) { usedBases.add(v); return v } }
+  usedBases.add(seed); return seed
 }
 
 // -------------------- 별명/특성 생성(슬라이더 반영) --------------------
@@ -204,29 +173,22 @@ function makeNicknameAndTraits(
   usedKingHeads: Set<string>,
   traitUsageCount: Map<string, number>,
 ): { nickname: string; traits: string[] } {
-  // 1) 슬라이더 반영 최종 점수
   const scores = finalBucketScores(f, settings)
   const ordered = Object.entries(scores).sort((a, b) => b[1] - a[1])
   const topKey = ordered[0][0]
   const secondKey = ordered[1]?.[0]
 
-  // 2) 별명 베이스 선택(겹치지 않게)
   const base = chooseNicknameBase(topKey, secondKey, usedNicknameBases, usedKingHeads)
   const nickname = `${base}${speaker}`
 
-  // 3) 특성: 임계 0.33 이상, 덜 쓰인 라벨 우선, 최대 3개
   const traits: string[] = []
   for (const [k, v] of ordered.slice(1)) {
     if (v < 0.33) continue
     const candidates = traitSynonyms[k] ?? [k]
-    let best = candidates[0]
-    let bestCnt = traitUsageCount.get(best) ?? 0
+    let best = candidates[0], bestCnt = traitUsageCount.get(best) ?? 0
     for (const c of candidates) {
       const cnt = traitUsageCount.get(c) ?? 0
-      if (cnt < bestCnt) {
-        best = c
-        bestCnt = cnt
-      }
+      if (cnt < bestCnt) { best = c; bestCnt = cnt }
     }
     if (!traits.includes(best)) {
       traits.push(best)
@@ -234,15 +196,38 @@ function makeNicknameAndTraits(
     }
     if (traits.length >= 3) break
   }
-
-  // 4) 보완: 하나도 못 뽑으면 2등 키에서 1개
   if (traits.length === 0 && ordered[1]) {
     const t = (traitSynonyms[ordered[1][0]] ?? [ordered[1][0]])[0]
-    traits.push(t)
-    traitUsageCount.set(t, (traitUsageCount.get(t) ?? 0) + 1)
+    traits.push(t); traitUsageCount.set(t, (traitUsageCount.get(t) ?? 0) + 1)
   }
-
   return { nickname, traits }
+}
+
+// -------------------- AI 제안(오버레이) 타입/머지 --------------------
+type AiPayload = {
+  roomSummary?: string
+  speakerAnalyses?: { speaker: string; nickname?: string; traits?: string[]; analysis?: string; featureSummary?: string }[]
+}
+const validateAI = (j: any): j is AiPayload =>
+  j && Array.isArray(j.speakerAnalyses) && j.speakerAnalyses.every((x: any) => typeof x?.speaker === "string")
+const uniqMerge = (a: string[] = [], b: string[] = []) => Array.from(new Set([...a, ...b]))
+
+// 휴리스틱 features/카운터는 보존, AI가 준 텍스트 정보만 얹기
+const mergeHeuristicWithAI = (heuristics: SpeakerVibeAnalysis[], ai: AiPayload | null): SpeakerVibeAnalysis[] => {
+  if (!ai || !validateAI(ai)) return heuristics
+  return heuristics.map(h => {
+    const m = ai.speakerAnalyses?.find(x => x.speaker === h.speaker)
+    if (!m) return h
+    return {
+      ...h,
+      nickname: m.nickname ?? h.nickname,
+      traits: m.traits ? uniqMerge(h.traits ?? [], m.traits) : h.traits,
+      featureSummary: m.featureSummary ?? h.featureSummary,
+      evidenceSnippets: m.analysis
+        ? uniqMerge(h.evidenceSnippets ?? [], [m.analysis])
+        : (h.evidenceSnippets ?? []),
+    }
+  })
 }
 
 // -------------------- 컴포넌트 --------------------
@@ -263,11 +248,8 @@ export default function VibeAnalysisPage() {
     messageLengthSensitivity: 50,
     timePatternSensitivity: 50,
   })
-  const [useAI, setUseAI] = useState(false)
-
-  useState(() => {
-    setUseAI(process.env.NEXT_PUBLIC_USE_AI === "true")
-  })
+  const [useAI, setUseAI] = useState(process.env.NEXT_PUBLIC_USE_AI === "true")
+  const [aiStatus, setAiStatus] = useState<"none" | "ai">("none")
 
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile)
@@ -301,106 +283,85 @@ export default function VibeAnalysisPage() {
     }
   }
 
+  // 기존 라우트(messages+speakers) 호출 → 제안만 반환
   const enhanceWithAI = async (
     messages: any[],
     speakers: string[],
-  ): Promise<{ roomSummary: string; speakerAnalyses: any[] }> => {
-    const response = await fetch("/api/ai/analyze", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: messages.slice(0, 100), // 최대 100개 메시지만 전송
-        speakers: speakers,
-      }),
-    })
+    settings: VibeSettings,
+    heuristics: any,
+  ): Promise<AiPayload | null> => {
+    try {
+      const MAX = 30000
+      const msg = messages.length > MAX ? messages.slice(-MAX) : messages
 
-    if (!response.ok) {
-      throw new Error("AI 분석 요청 실패")
-    }
+      const response = await fetch("/api/ai/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: msg,
+          speakers,
+          settings,
+          heuristics,
+        }),
+      })
+      if (!response.ok) return null
 
-    const aiResult = await response.json()
-
-    // AI 결과를 기존 형식에 맞게 변환
-    const speakerAnalyses = aiResult.speakerAnalyses.map((analysis: any) => ({
-      speaker: analysis.speaker,
-      nickname: analysis.nickname,
-      traits: analysis.traits,
-      features: {
-        positiveCount: 0,
-        negativeCount: 0,
-        questionCount: 0,
-        linkCount: 0,
-        exclamationCount: 0,
-        averageMessageLength: 0,
-        timeDistribution: {},
-      },
-      evidenceSnippets: [analysis.analysis || ""],
-    }))
-
-    return {
-      roomSummary: aiResult.roomSummary,
-      speakerAnalyses: speakerAnalyses,
+      const aiResult = await response.json()
+      const payload: AiPayload = {
+        roomSummary: aiResult.roomSummary,
+        speakerAnalyses: Array.isArray(aiResult.speakerAnalyses)
+          ? aiResult.speakerAnalyses.map((a: any) => ({
+              speaker: a.speaker,
+              nickname: a.nickname,
+              traits: a.traits,
+              featureSummary: a.featureSummary,
+              analysis: a.analysis,
+            }))
+          : [],
+      }
+      return validateAI(payload) ? payload : null
+    } catch {
+      return null
     }
   }
 
   const handleAnalyze = async () => {
     if (!parseResult) return
     setIsAnalyzing(true)
+    setAiStatus("none")
 
     try {
       const filteredMessages = parseResult.messages.filter((msg) => includedSpeakers.includes(msg.speaker))
 
+      // 1) 휴리스틱 분석(항상 표시)
+      const heuristicResult = analyzeVibe(filteredMessages)
+      const usedNicknameBases = new Set<string>()
+      const usedKingHeads = new Set<string>()
+      const traitUsageCount = new Map<string, number>()
+
+      const adjustedAnalyses = heuristicResult.speakerAnalyses.map((analysis) => {
+        const { nickname, traits } = makeNicknameAndTraits(
+          analysis.speaker,
+          analysis.features as Feature,
+          settings,
+          usedNicknameBases,
+          usedKingHeads,
+          traitUsageCount,
+        )
+        return { ...analysis, nickname, traits }
+      })
+
+      setRoomSummary(heuristicResult.roomSummary)
+      setSpeakerAnalyses(adjustedAnalyses)
+
+      // 2) AI가 켜져 있으면 제안 받아서 텍스트 정보만 덮어쓰기
       if (useAI) {
-        try {
-          const aiResult = await enhanceWithAI(filteredMessages, includedSpeakers)
-          setRoomSummary(aiResult.roomSummary)
-          setSpeakerAnalyses(aiResult.speakerAnalyses)
-        } catch (error) {
-          console.error("AI 분석 오류:", error)
-          // AI 실패 시 휴리스틱 분석으로 폴백
-          const heuristicResult = analyzeVibe(filteredMessages)
-          const usedNicknameBases = new Set<string>()
-          const usedKingHeads = new Set<string>()
-          const traitUsageCount = new Map<string, number>()
-
-          const adjustedAnalyses = heuristicResult.speakerAnalyses.map((analysis) => {
-            const { nickname, traits } = makeNicknameAndTraits(
-              analysis.speaker,
-              analysis.features as Feature,
-              settings,
-              usedNicknameBases,
-              usedKingHeads,
-              traitUsageCount,
-            )
-            return { ...analysis, nickname, traits }
-          })
-
-          setRoomSummary(`${heuristicResult.roomSummary} (AI 분석 실패로 휴리스틱 분석 사용)`)
-          setSpeakerAnalyses(adjustedAnalyses)
+        const ai = await enhanceWithAI(filteredMessages, includedSpeakers, settings, { speakerAnalyses: adjustedAnalyses })
+        if (ai) {
+          setRoomSummary(ai.roomSummary ?? heuristicResult.roomSummary)
+          setSpeakerAnalyses(mergeHeuristicWithAI(adjustedAnalyses, ai))
+          setAiStatus("ai")
         }
-      } else {
-        // 휴리스틱 분석
-        const heuristicResult = analyzeVibe(filteredMessages)
-        const usedNicknameBases = new Set<string>()
-        const usedKingHeads = new Set<string>()
-        const traitUsageCount = new Map<string, number>()
-
-        const adjustedAnalyses = heuristicResult.speakerAnalyses.map((analysis) => {
-          const { nickname, traits } = makeNicknameAndTraits(
-            analysis.speaker,
-            analysis.features as Feature,
-            settings,
-            usedNicknameBases,
-            usedKingHeads,
-            traitUsageCount,
-          )
-          return { ...analysis, nickname, traits }
-        })
-
-        setRoomSummary(heuristicResult.roomSummary)
-        setSpeakerAnalyses(adjustedAnalyses)
       }
     } catch (error) {
       console.error("분석 오류:", error)
@@ -438,13 +399,13 @@ export default function VibeAnalysisPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold mb-2">대화방 분위기 & 별명</h1>
         <p className="text-muted-foreground">
-          대화의 전반적인 분위기를 분석하고 참여자들의 특성에 따른 별명을 제안합니다.
+          대화의 전반적인 분위기를 분석하고 참여자들의 특성에 따른 별명을 제안합니다. 
+        {!useAI ? (
+          <Badge variant="secondary" className="mt-2">AI 미사용 모드</Badge>
+        ) : aiStatus === "ai" ? (
+          <Badge className="mt-2">AI 제안 반영</Badge>
+        ) : null}
         </p>
-        {!useAI && (
-          <Badge variant="secondary" className="mt-2">
-            AI 미사용 모드
-          </Badge>
-        )}
       </div>
 
       <Card>
@@ -527,15 +488,10 @@ export default function VibeAnalysisPage() {
               ))}
             </div>
 
-            <Button
-              onClick={handleReanalyze}
-              disabled={!parseResult || isAnalyzing}
-              variant="outline"
-              className="w-full bg-transparent"
-            >
+            {/* <Button onClick={handleReanalyze} disabled={!parseResult || isAnalyzing} variant="outline" className="w-full bg-transparent">
               <RefreshCw className="h-4 w-4 mr-2" />
               재분석하기
-            </Button>
+            </Button> */}
           </CardContent>
         </Card>
       )}
@@ -571,6 +527,23 @@ export default function VibeAnalysisPage() {
                       ))}
                     </div>
                   </div>
+                  {analysis.featureSummary && (
+                    <span className="font-bold text-lg">
+                        {analysis.featureSummary}
+                    </span>
+                  )}
+                  {analysis.evidenceSnippets.length > 0 && (
+                    <div>
+                      {/* <h4 className="font-medium mb-2">대표 메시지</h4> */}
+                      <div className="space-y-2">
+                        {analysis.evidenceSnippets.slice(0, 3).map((snippet, index) => (
+                          <div key={index} className="p-2 bg-muted rounded text-sm">
+                            "{snippet}"
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -598,8 +571,7 @@ export default function VibeAnalysisPage() {
                     <div>
                       <h4 className="font-medium mb-2">메시지 특성</h4>
                       <ul className="space-y-1 text-muted-foreground">
-                        <li>평균 메시지 길이: {analysis.features.averageMessageLength}자</li>
-                        <li>감탄문: {analysis.features.exclamationCount}개</li>
+                        <li>평균 메시지 길이: {analysis.features.averageMessageLength}자 / 감탄문: {analysis.features.exclamationCount}개</li>
                       </ul>
                     </div>
                     <div>
@@ -609,19 +581,6 @@ export default function VibeAnalysisPage() {
                       </p>
                     </div>
                   </div>
-
-                  {analysis.evidenceSnippets.length > 0 && (
-                    <div>
-                      <h4 className="font-medium mb-2">대표 메시지</h4>
-                      <div className="space-y-2">
-                        {analysis.evidenceSnippets.slice(0, 3).map((snippet, index) => (
-                          <div key={index} className="p-2 bg-muted rounded text-sm">
-                            "{snippet}"
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
             ))}
