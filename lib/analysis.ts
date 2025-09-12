@@ -1,4 +1,9 @@
 import type { ParsedMessage } from "./parseKakao"
+import { positiveWords, negativeWords, swearWords, makeMatcher, countMatches } from "@/lib/lexicon"
+
+const POS_RX = makeMatcher(positiveWords)
+const NEG_RX = makeMatcher(negativeWords)
+const SWEAR_RX = makeMatcher(swearWords)
 
 export interface KeywordAnalysis {
   keyword: string
@@ -57,6 +62,7 @@ export interface SpeakerVibeAnalysis {
 export interface SpeakerFeatures {
   positiveCount: number
   negativeCount: number
+  swearCount: number
   questionCount: number
   exclamationCount: number
   linkCount: number
@@ -221,6 +227,7 @@ export function analyzeVibe(messages: ParsedMessage[]): {
     const features = speakerFeatures.get(message.speaker) || {
       positiveCount: 0,
       negativeCount: 0,
+      swearCount: 0,
       questionCount: 0,
       exclamationCount: 0,
       linkCount: 0,
@@ -230,19 +237,18 @@ export function analyzeVibe(messages: ParsedMessage[]): {
 
     // 감정 분석 (간단한 키워드 기반)
     const text = message.text
-    if (/좋|감사|고마|최고|굿|좋아|행복|기쁘|웃|ㅎㅎ|ㅋㅋ/.test(text)) {
-      features.positiveCount++
-    }
-    if (/싫|화|짜증|아|힘들|슬프|우울|ㅠㅠ/.test(text)) {
-      features.negativeCount++
-    }
+
+    features.positiveCount += countMatches(text, POS_RX)
+    features.negativeCount += countMatches(text, NEG_RX)
+    features.swearCount    += countMatches(text, SWEAR_RX)
+
     if (/\?|뭐|어떻|언제|어디|누구|왜|어떡/.test(text)) {
       features.questionCount++
     }
     if (/!|와|우와|대박|진짜/.test(text)) {
-      features.exclamationCount++
+      features.exclamationCount += (text.match(/[!！]+/g)?.join("").length ?? 0)
     }
-    if (/http|www\.|\.com|\.kr/.test(text)) {
+    if (/https?:\/\//i.test(text)) {
       features.linkCount++
     }
 

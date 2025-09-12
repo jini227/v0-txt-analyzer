@@ -1,8 +1,14 @@
 // heuristics.ts — 피처 계산 전용(별명/특성은 page.tsx에서 최종 결정)
+import { positiveWords, negativeWords, swearWords, makeMatcher, countMatches } from "@/lib/lexicon"
+
+const POS_RX = makeMatcher(positiveWords)
+const NEG_RX = makeMatcher(negativeWords)
+const SWEAR_RX = makeMatcher(swearWords)
 
 export type Feature = {
   positiveCount: number
   negativeCount: number
+  swearCount: number
   questionCount: number
   linkCount: number
   exclamationCount: number
@@ -20,15 +26,6 @@ export type SpeakerVibeAnalysis = {
 }
 
 type Msg = { speaker: string; text: string; timestamp?: string | number | Date }
-
-const positiveWords = [
-  "좋다","좋아요","즐거웠다","굿","고마워","감사","최고","행복","대박",
-  "멋져","예쁘","웃겨","사랑","맛있어요","귀여운","축하","화이팅","멋있","짱","짱이야","짱이다","쩐다","쩔어"
-]
-const negativeWords = [
-  "싫다","안좋아","별로","최악","짜증","빡","화나","불편","나쁘","개같","짱짱","킹받","킹받네",
-  "힘들","미친","죽어","답답","속상해요","짜증나","화나요","불편해","나빠요"
-]
 
 function countContains(text: string, dict: string[]) {
   let c = 0
@@ -61,8 +58,9 @@ export function analyzeVibe(messages: Msg[]): {
 
     for (const m of msgs) {
       const t = (m.text || "").trim()
-      pos += countContains(t, positiveWords)
-      neg += countContains(t, negativeWords)
+      pos += countMatches(t, POS_RX)
+      neg += countMatches(t, NEG_RX)
+      sw = countMatches(t, SWEAR_RX)
       q += (t.match(/\?/g) || []).length
       link += /(https?:\/\/|www\.)/i.test(t) ? 1 : 0
       bang += (t.match(/!+/g) || []).length
@@ -78,6 +76,7 @@ export function analyzeVibe(messages: Msg[]): {
       features: {
         positiveCount: pos,
         negativeCount: neg,
+        swearCount: sw,
         questionCount: q,
         linkCount: link,
         exclamationCount: bang,

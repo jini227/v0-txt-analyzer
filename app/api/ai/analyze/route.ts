@@ -31,11 +31,11 @@ export async function POST(request: NextRequest) {
     // 휴리스틱 결과 요약
     const heuristicsText = heuristics
       ? `
-휴리스틱 분석 결과(참고):
+휴리스틱 분석 결과:
 ${heuristics.speakerAnalyses
         .map(
           (h: any) =>
-            `- ${h.speaker}: 별명=${h.nickname ?? ""}, 특성=${(h.traits ?? []).join(", ")}, 긍정=${h.features?.positiveCount ?? 0}, 부정=${h.features?.negativeCount ?? 0}, 질문=${h.features?.questionCount ?? 0}, 링크=${h.features?.linkCount ?? 0}, 감탄=${h.features?.exclamationCount ?? 0}, 평균길이=${h.features?.averageMessageLength ?? 0}, 활동시간=${JSON.stringify(h.features?.timeDistribution ?? {})}`
+            `- ${h.speaker}: 별명=${h.nickname ?? ""}, 특성=${(h.traits ?? []).join(", ")}, 긍정=${h.features?.positiveCount ?? 0}, 부정=${h.features?.negativeCount ?? 0}, 욕설=${h.features?.swearCount ?? 0}, 질문=${h.features?.questionCount ?? 0}, 링크=${h.features?.linkCount ?? 0}, 감탄=${h.features?.exclamationCount ?? 0}, 평균길이=${h.features?.averageMessageLength ?? 0}, 활동시간=${JSON.stringify(h.features?.timeDistribution ?? {})}`
         )
         .join("\n")}
 `
@@ -155,9 +155,9 @@ ${sampleMessages}
 
 요구사항:
 - 각 화자별로 "별명", "특성(3개)", "특징 한 문장 요약", "대화내용 분석(1-2문장)"을 반드시 포함하세요.
-- "특징 한 문장 요약"은 화자의 말투를 통해 알 수 있는 화자의 특징 입니다. 짧고 임팩트 있게 한문장으로 작성하세요.
-- "특징 한 문장 요약"에는 반드시 해당 화자와 어울리는 이모지도(1개) 함께 들어갑니다. 
+- 해당 대화방의 말투와 유사하게 작성 되어 집니다. 
 - 분석 민감도 설정값이 높거나 낮으면 결과도 그에 맞게 극적으로 표현하세요.
+- "특징 한 문장 요약"은 화자의 말투를 통해 알 수 있는 화자의 특징 입니다. 짧고 임팩트 있게 10자 이내로 작성하되 휴리스틱 분석 결과중 욕설이 가장 많은 화자는 반드시 욕쟁이 별명이 붙음.
 - 휴리스틱 결과(별명, 특성, 점수 등)를 기반으로 분석 하되, AI의 창의력도 적극 반영하세요.
 - 휴리스틱의 분석 결과 중 긍정/부정/질문/링크/감탄의 개수를 적극 고려 하고, 긍정 표현 수 대비 부정 표현의 수가 가장 많은 화자는 반드시 부정적인 특성을 포함하세요.
 - 반드시 아래 JSON 형식으로만 응답하세요. (코드펜스/설명/주석 금지)

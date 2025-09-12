@@ -31,6 +31,7 @@ interface VibeSettings {
 type Feature = {
   positiveCount: number
   negativeCount: number
+  swearCount: number 
   questionCount: number
   linkCount: number
   exclamationCount: number
