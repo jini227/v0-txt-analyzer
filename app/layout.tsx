@@ -4,6 +4,8 @@ import { GeistSans } from "geist/font/sans"
 import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
 import { Suspense } from "react"
+import Script from "next/script";
+import KakaoInit from "./KakaoInit";
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -22,7 +24,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko">
+      <head>
+        <Script
+          src="https://developers.kakao.com/sdk/js/kakao.js"
+          strategy="beforeInteractive"
+        />
+      </head>
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`}>
+        <KakaoInit />
         <Suspense fallback={null}>{children}</Suspense>
         <Analytics />
       </body>
