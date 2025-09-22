@@ -16,7 +16,7 @@ import {
   ResponsiveContainer, Cell,
 } from "recharts";
 import {
-  Download, FileText, Users, TrendingUp, Camera, Share2, UserRound,
+  Download, FileText, Users, Camera, Share2, UserRound, Clock, Activity, MessageSquare, CalendarDays, TrendingUp,
 } from "lucide-react";
 import {
   parseKakaoTxt, getDaysSinceStart, formatKoreanDate,
@@ -77,7 +77,7 @@ function groupTimelineBySpeaker(rows: TimelineRow[]) {
     by.get(r.speaker)!.push(r);
   }
   for (const v of by.values()) v.sort((a, b) => (a.date + a.time < b.date + b.time ? 1 : -1));
-  return by; // Map 유지
+  return by;
 }
 
 function escapeRegExp(str: string) {
@@ -109,22 +109,13 @@ const makeSpeakerTick =
     const name = payload?.value as string;
     const short = name.length > 3 ? name.slice(0, 3) + "…" : name;
     return (
-      <text
-        x={x}
-        y={y}
-        dy={4}
-        textAnchor="end"
-        fill={colorOf(name)}
-        fontSize={12}
-      >
+      <text x={x} y={y} dy={4} textAnchor="end" fill={colorOf(name)} fontSize={12}>
         {short}
       </text>
     );
   };
 
-/* ------------------------------------------------------------------ */
-/* 아주 간단한 자체 Toast (외부 의존성 없이 사용)                      */
-/* ------------------------------------------------------------------ */
+/* 아주 간단한 자체 Toast */
 function useSimpleToast() {
   const [msg, setMsg] = useState<string | null>(null);
   const show = (m: string) => {
@@ -142,6 +133,8 @@ function useSimpleToast() {
   return { show, Toast };
 }
 
+const nf = (n: number | string) => Number(n ?? 0).toLocaleString();
+
 /* ------------------------------------------------------------------ */
 
 export default function KeywordCounterPage() {
@@ -153,35 +146,30 @@ export default function KeywordCounterPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isRecomputing, setIsRecomputing] = useState(false); // 화자 변경 재계산 로딩
-  const [enforceExisting, setEnforceExisting] = useState(true); // 존재하는 화자만 추가 허용
+  const [isRecomputing, setIsRecomputing] = useState(false);
+  const [enforceExisting, setEnforceExisting] = useState(true);
 
   const { show: showToast, Toast } = useSimpleToast();
 
-  // 색상 고정: 파싱된 전체 화자 기준
   const baseSpeakers = useMemo(
     () => (parseResult?.speakers ?? []).slice().sort((a, b) => a.localeCompare(b)),
     [parseResult]
   );
   const colorOf = useMemo(() => makeColorPicker(baseSpeakers), [baseSpeakers]);
 
-  // 화자 변경 시 자동 재계산 + 로딩
   useEffect(() => {
-    if (!analysis) return;               // 분석이 한 번도 안된 상태면 패스
+    if (!analysis) return;
     if (!parseResult || !keyword.trim()) return;
 
     setIsRecomputing(true);
     const id = setTimeout(() => {
       const next = analyzeKeyword(parseResult.messages, keyword.trim(), includedSpeakers);
-
-      // 현재 선택된 화자들 기준 0건이면 결과 숨기고 토스트
       if (next.summary.totalKeywordHits === 0) {
         setAnalysis(null);
         setIsRecomputing(false);
         showToast(`선택한 화자들에서 '${keyword.trim()}' 키워드가 발견되지 않았습니다.`);
         return;
       }
-
       setAnalysis(next);
       setIsRecomputing(false);
     }, 0);
@@ -189,7 +177,6 @@ export default function KeywordCounterPage() {
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [includedSpeakers]);
-
 
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile);
@@ -218,15 +205,12 @@ export default function KeywordCounterPage() {
     setIsAnalyzing(true);
     setTimeout(() => {
       const result = analyzeKeyword(parseResult.messages, keyword.trim(), includedSpeakers);
-
-      // 전체 결과 0건이면 토스트만 띄우고 결과는 숨김
       if (result.summary.totalKeywordHits === 0) {
         setAnalysis(null);
         showToast(`'${keyword.trim()}' 키워드가 발견되지 않았습니다.`);
         setIsAnalyzing(false);
         return;
       }
-
       setAnalysis(result);
       setIsAnalyzing(false);
     }, 1000);
@@ -238,19 +222,16 @@ export default function KeywordCounterPage() {
     if (!parseResult) return false;
     const trimmed = s.trim();
     if (!trimmed) return false;
-
     if (includedSpeakers.includes(trimmed)) {
       showToast(`"${trimmed}" 화자는 이미 추가되어 있습니다.`);
-      return false; // 실패 처리 → 입력창 유지
+      return false;
     }
-
     if (enforceExisting && !parseResult.speakers.includes(trimmed)) {
       showToast(`"${trimmed}" 화자는 이 대화에 존재하지 않습니다.`);
-      return false; // 실패 -> 입력 유지
+      return false;
     }
-
     setIncludedSpeakers((p) => [...p, trimmed]);
-    return true; // 성공 -> 입력 닫기
+    return true;
   };
 
   const handleClearFile = () => {
@@ -302,19 +283,72 @@ export default function KeywordCounterPage() {
     );
   };
 
-  // 화자 수에 따라 차트 높이 자동 조절
   const chartHeight = useMemo(() => {
     const n = analysis ? analysis.speakerStats.length : includedSpeakers.length;
     return Math.max(220, n * 28 + 40);
   }, [analysis, includedSpeakers.length]);
 
   const orderedSpeakers = useMemo(() => {
-  if (!analysis) return [];
-  return [...analysis.speakerStats]
-    .sort((a, b) => b.totalHits - a.totalHits)
-    .map((s) => s.speaker)
-    .filter((sp) => includedSpeakers.includes(sp));
+    if (!analysis) return [];
+    return [...analysis.speakerStats]
+      .sort((a, b) => b.totalHits - a.totalHits)
+      .map((s) => s.speaker)
+      .filter((sp) => includedSpeakers.includes(sp));
   }, [analysis, includedSpeakers]);
+
+  /* ----------------------------- 데이터 시각화 KPIs ----------------------------- */
+  const dataViz = useMemo(() => {
+    if (!analysis || !parseResult) return null;
+
+    const daysElapsed = getDaysSinceStart(parseResult.conversationStartDate);
+    const totalHits = analysis.summary.totalKeywordHits;
+
+    const byHour = new Map<string, number>();
+    (analysis.timeline as unknown as TimelineRow[]).forEach((r) => {
+      const hour = (r.time || "").slice(0, 2);
+      byHour.set(hour, (byHour.get(hour) ?? 0) + r.hitsInMessage);
+    });
+    let topHour = "-";
+    let topHourCount = 0;
+    for (const [h, c] of byHour.entries()) {
+      if (c > topHourCount) { topHour = h; topHourCount = c; }
+    }
+
+    const activeSpeakers = analysis.speakerStats.filter((s) => s.totalHits > 0).length;
+    const selectedSpeakers = includedSpeakers.length;
+
+    const totalMessages = parseResult.messages.reduce((acc, m) => {
+      if (!selectedSpeakers || includedSpeakers.includes(m.speaker)) return acc + 1;
+      return acc;
+    }, 0);
+
+    const byDate = new Map<string, number>();
+    (analysis.timeline as unknown as TimelineRow[]).forEach((r) => {
+      byDate.set(r.date, (byDate.get(r.date) ?? 0) + r.hitsInMessage);
+    });
+    let topDate = "-";
+    let topDateCount = 0;
+    for (const [d, c] of byDate.entries()) {
+      if (c > topDateCount) { topDate = d; topDateCount = c; }
+    }
+
+    const avgPerDay = daysElapsed > 0 ? totalHits / daysElapsed : 0;
+
+    // 추가 KPI: 키워드 포함 메시지 수(= 타임라인 건수)
+    const keywordMsgCount = (analysis.timeline as unknown as TimelineRow[]).length;
+
+    return {
+      daysElapsed,
+      totalHits,
+      topHour, topHourCount,
+      activeSpeakers, selectedSpeakers,
+      totalMessages,
+      topDate, topDateCount,
+      avgPerDay,
+      keywordMsgCount,
+      startDate: parseResult.conversationStartDate,
+    };
+  }, [analysis, parseResult, includedSpeakers]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 px-3">
@@ -322,11 +356,9 @@ export default function KeywordCounterPage() {
       <LoadingOverlay
         isLoading={isProcessing || isAnalyzing || isRecomputing}
         message={
-          isProcessing
-            ? "파일 분석 중..."
-            : isAnalyzing
-            ? "키워드 분석 중..."
-            : "필터 적용 중..."
+          isProcessing ? "파일 분석 중..."
+          : isAnalyzing ? "키워드 분석 중..."
+          : "필터 적용 중..."
         }
       />
 
@@ -400,17 +432,6 @@ export default function KeywordCounterPage() {
               addable
               getColor={colorOf}
             />
-
-            {/* 존재하는 화자만 추가 허용 토글 */}
-            {/* <label className="mt-3 flex items-center gap-2 text-xs text-muted-foreground select-none">
-              <input
-                type="checkbox"
-                className="accent-foreground"
-                checked={enforceExisting}
-                onChange={(e) => setEnforceExisting(e.target.checked)}
-              />
-              존재하는 화자만 추가 허용
-            </label> */}
           </CardContent>
         </Card>
       )}
@@ -418,62 +439,31 @@ export default function KeywordCounterPage() {
       {/* 분석 결과 */}
       {analysis && parseResult && (
         <div id="analysis-results" className="space-y-6">
-          {/* 요약 */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Card className="rounded-xl">
-              <CardHeader className="pb-2 pt-3 px-4">
-                <CardTitle className="text-sm">
-                  <div className="flex items-center gap-2 min-w-0 leading-none">
-                    <TrendingUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">경과 일수</span>
-                  </div>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0 pb-3 px-4">
-                <p className="text-2xl font-bold">{getDaysSinceStart(parseResult.conversationStartDate)}일</p>
-                <p className="text-xs text-muted-foreground mt-1">{formatKoreanDate(parseResult.conversationStartDate)} ~</p>
-              </CardContent>
-            </Card>
 
-            <Card className="rounded-xl">
-              <CardHeader className="pb-2 pt-3 px-4">
-                <CardTitle className="text-sm">
-                  <div className="flex items-center gap-2 min-w-0 leading-none">
-                    <span className="h-4 w-4 grid place-items-center text-muted-foreground">#</span>
-                    <span className="truncate">총 키워드 발생</span>
-                  </div>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0 pb-3 px-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-2xl font-bold"><strong>{analysis.summary.totalKeywordHits}</strong></span>
-                  <span className="text-sm text-muted-foreground"># {analysis.keyword}</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-xl">
-              <CardHeader className="pb-2 pt-3 px-4">
-                <CardTitle className="text-sm">
-                  <div className="flex items-center gap-2 min-w-0 leading-none">
-                    <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">키워드 사용 TOP 1</span>
-                  </div>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0 pb-3 px-4">
-                {analysis.speakerStats.slice(0, 1).map((stat) => {
+          {/* TOP 1 (차트 위에만 노출) */}
+          <Card className="rounded-xl">
+            <CardHeader className="pb-2 pt-3 px-4">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Users className="h-4 w-4 text-muted-foreground" />
+                키워드 사용 TOP 1
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 pb-3 px-4">
+              {analysis.speakerStats
+                .slice()
+                .sort((a, b) => b.totalHits - a.totalHits)
+                .slice(0, 1)
+                .map((stat) => {
                   const c = colorOf(stat.speaker);
                   return (
                     <div key={stat.speaker} className="flex items-center justify-between">
                       <span className="text-2xl font-bold" style={{ color: c }}>{stat.speaker}</span>
-                      <span className="text-sm text-muted-foreground">{stat.totalHits}회</span>
+                      <span className="text-sm text-muted-foreground">{nf(stat.totalHits)}회</span>
                     </div>
                   );
                 })}
-              </CardContent>
-            </Card>
-          </div>
+            </CardContent>
+          </Card>
 
           {/* 화자별 사용 횟수 차트 */}
           <Card className="rounded-xl">
@@ -485,7 +475,7 @@ export default function KeywordCounterPage() {
               {(() => {
                 const chartData = [...analysis.speakerStats]
                   .map((s: SpeakerStat) => ({ name: s.speaker, count: s.totalHits }))
-                  .filter((d) => d.count > 0)   
+                  .filter((d) => d.count > 0)
                   .sort((a, b) => b.count - a.count);
 
                 const SpeakerTick = makeSpeakerTick(colorOf);
@@ -500,7 +490,7 @@ export default function KeywordCounterPage() {
                         dataKey="name"
                         width={50}
                         tick={<SpeakerTick />}
-                        interval={0}        // 모든 라벨 표시
+                        interval={0}
                         tickLine={false}
                       />
                       <Tooltip
@@ -516,7 +506,7 @@ export default function KeywordCounterPage() {
                                 <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
                                 <span className="font-medium">{speaker}</span>
                               </div>
-                              <div className="mt-1 text-muted-foreground">총 {p?.value}회</div>
+                              <div className="mt-1 text-muted-foreground">총 {nf(p?.value)}회</div>
                             </div>
                           );
                         }}
@@ -550,44 +540,32 @@ export default function KeywordCounterPage() {
                   return orderedSpeakers.map((speaker) => {
                     const color = colorOf(speaker);
                     const rows = grouped.get(speaker) ?? [];
-                    if (rows.length === 0) return null; // 0건은 보여줄 필요 없음
+                    if (rows.length === 0) return null;
 
                     const { first, last } = speakerDateRange(rows);
 
                     return (
-                      <AccordionItem
-                        key={speaker}
-                        value={speaker}
-                        className="rounded-lg border mb-3"
-                      >
+                      <AccordionItem key={speaker} value={speaker} className="rounded-lg border mb-3">
                         <AccordionTrigger className="px-4 py-3">
                           <div className="flex w-full items-center justify-between gap-3 min-w-0">
                             <div className="flex items-center gap-3 min-w-0">
-                              <span
-                                className="h-4 w-1 rounded"
-                                style={{ backgroundColor: color }}
-                              />
+                              <span className="h-4 w-1 rounded" style={{ backgroundColor: color }} />
                               <span className="font-semibold truncate">{speaker}</span>
                             </div>
-                            <span
-                              className="text-xs px-2 py-1 rounded-full bg-muted text-foreground shrink-0"
-                              style={{ border: `1px solid ${color}` }}
-                            >
-                              {rows.length}건
+                            <span className="text-xs px-2 py-1 rounded-full bg-muted text-foreground shrink-0" style={{ border: `1px solid ${color}` }}>
+                              {nf(rows.length)}건
                             </span>
                           </div>
                         </AccordionTrigger>
 
                         <AccordionContent className="px-0 pb-0">
                           <div className="px-4 pb-4">
-                            {/* 날짜 범위 라벨: 본문 상단, 작은/연한 글씨 */}
                             <div className="mb-2 text-[11px] text-muted-foreground">
                               최초 {first} · 최신 {last}
                             </div>
 
                             <div className="overflow-x-auto">
                               <div className="min-w-[680px]">
-                                {/* 헤더: sm 이상에서만 표시. 컬럼 수는 행과 동일하게 맞춘다 */}
                                 <div className="hidden sm:grid sm:grid-cols-[180px_1fr] text-[12px] uppercase text-muted-foreground bg-muted/50 sticky top-0 px-4 py-2">
                                   <div>날짜 / 시간</div>
                                   <div>메시지</div>
@@ -597,19 +575,11 @@ export default function KeywordCounterPage() {
                                   {rows.map((r, i) => (
                                     <li
                                       key={i}
-                                      className="
-                                        grid grid-cols-1 sm:grid-cols-[180px_1fr]
-                                        items-start border-b last:border-0
-                                        px-4 py-2
-                                        odd:bg-muted/10 hover:bg-muted/20 transition-colors
-                                      "
+                                      className="grid grid-cols-1 sm:grid-cols-[180px_1fr] items-start border-b last:border-0 px-4 py-2 odd:bg-muted/10 hover:bg-muted/20 transition-colors"
                                     >
-                                      {/* 날짜/시간: 더 작고 연한 색, 모노스페이스 */}
                                       <div className="sm:py-2 sm:pr-2 text-[11px] text-muted-foreground font-mono tabular-nums">
                                         {r.date} {r.time}
                                       </div>
-
-                                      {/* 메시지: 가독성 유지, 키워드 하이라이트 */}
                                       <div className="sm:py-2 sm:pr-2 text-sm leading-relaxed">
                                         <div className="max-w-[70ch] sm:max-w-[90ch]">
                                           {highlightKeyword(r.message, analysis.keyword)}
@@ -630,6 +600,68 @@ export default function KeywordCounterPage() {
             </CardContent>
           </Card>
 
+          {/* 데이터 시각화 (Timeline 아래) */}
+          {dataViz && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-muted-foreground" />
+                  데이터 시각화
+                </CardTitle>
+                <CardDescription>
+                  키워드 “{analysis.keyword}” 사용 패턴 분석 결과
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <Kpi
+                    icon={<TrendingUp className="h-4 w-4" />}
+                    label="경과 일수"
+                    value={`${nf(dataViz.daysElapsed)}일`}
+                    hint={formatKoreanDate(dataViz.startDate)+ ' ~'}
+                  />
+                  <Kpi
+                    icon={<Activity className="h-4 w-4" />}
+                    label="총 키워드 사용"
+                    value={`${nf(dataViz.totalHits)}회`}
+                    hint={`# ${analysis.keyword}`}
+                  />
+                  <Kpi
+                    icon={<Clock className="h-4 w-4" />}
+                    label="최다 사용 시간대"
+                    value={dataViz.topHour === "-" ? "-" : `${dataViz.topHour}시`}
+                    hint={dataViz.topHour === "-" ? "" : `${nf(dataViz.topHourCount)}회`}
+                  />
+                  <Kpi
+                    icon={<Users className="h-4 w-4" />}
+                    label="참여 화자"
+                    value={`${nf(dataViz.activeSpeakers)} / ${nf(dataViz.selectedSpeakers)}`}
+                  />
+                  <Kpi
+                    icon={<MessageSquare className="h-4 w-4" />}
+                    label="전체 메시지"
+                    value={`${nf(dataViz.totalMessages)}건`}
+                  />
+                  <Kpi
+                    icon={<MessageSquare className="h-4 w-4" />}
+                    label="키워드 포함 메시지"
+                    value={`${nf(dataViz.keywordMsgCount)}건`}
+                  />
+                  <Kpi
+                    icon={<CalendarDays className="h-4 w-4" />}
+                    label="최다 사용 일자"
+                    value={dataViz.topDate === "-" ? "-" : `${dataViz.topDate}`}
+                    hint={dataViz.topDate === "-" ? "" : `${nf(dataViz.topDateCount)}회`}
+                  />
+                  <Kpi
+                    icon={<Activity className="h-4 w-4" />}
+                    label="일평균 사용"
+                    value={`${nf(dataViz.avgPerDay.toFixed(1))}회`}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* 다운로드 */}
           <Card>
@@ -649,13 +681,41 @@ export default function KeywordCounterPage() {
         </div>
       )}
 
-      {/* 빈 상태 */}
       {!parseResult && !isProcessing && (
         <EmptyState
           title="TXT를 업로드해 시작하세요"
           description="카카오톡 대화 파일을 업로드하면 키워드 분석을 시작할 수 있습니다."
         />
       )}
+    </div>
+  );
+}
+
+/* ----------------------------- KPI 컴포넌트 ----------------------------- */
+function Kpi({
+  icon,
+  label,
+  value,
+  hint, // 값 오른쪽 작은 보조 텍스트
+  sub,  // 값 아래 매우 작은 보조 텍스트
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  hint?: string;
+  sub?: string;
+}) {
+  return (
+    <div className="rounded-xl border p-4">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+        <span className="text-muted-foreground/80">{icon}</span>
+        <span>{label}</span>
+      </div>
+      <div className="flex items-baseline gap-2">
+        <div className="text-xl font-semibold">{value}</div>
+        {hint ? <div className="text-[11px] text-muted-foreground">{hint}</div> : null}
+      </div>
+      {sub ? <div className="text-[11px] text-muted-foreground mt-0.5">{sub}</div> : null}
     </div>
   );
 }
