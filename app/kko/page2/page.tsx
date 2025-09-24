@@ -1,20 +1,18 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, useRef, Fragment } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { Progress } from "@/components/ui/progress"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { FileDropzone } from "@/components/ui/file-dropzone"
 import { Chips } from "@/components/ui/chips"
 import { DataTable } from "@/components/ui/data-table"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Badge } from "@/components/ui/badge"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
-import { Download, FileText, Users, ChevronDown, ChevronRight, Camera, Share2, Crown, Medal, Award } from "lucide-react"
+import { Download, FileText, Users, Camera, Share2, Crown, Medal, Award, Info, ArrowUp } from "lucide-react"
 import { parseKakaoTxt } from "@/lib/parseKakao"
 import { analyzeWords } from "@/lib/analysis"
 import { generateWordAnalysisCSV, downloadCSV } from "@/lib/csv"
@@ -22,153 +20,212 @@ import { captureAndSave, captureAndKakaoShare } from "@/lib/capture"
 import type { ParseResult } from "@/lib/parseKakao"
 import type { WordAnalysis } from "@/lib/analysis"
 
-// 글로벌 랭킹을 위한 인터페이스
-interface GlobalWordRank {
-  word: string
-  topSpeaker: string
-  topCount: number
-  allSpeakers: { speaker: string; count: number }[]
+/* ---------------- page1과 동일한 팔레트/유틸 ---------------- */
+const DISTINCT_PALETTE = [
+  "#E74C3C", "#FF6B81", "#F39C12", "#F1C40F",
+  "#2ECC71", "#27AE60", "#3498DB", "#2980B9",
+  "#9B59B6", "#8E44AD", "#1ABC9C", "#16A085",
+  "#E67E22", "#D35400", "#95A5A6", "#7F8C8D",
+  "#FFC300", "#FF5733", "#C70039", "#900C3F",
+  "#581845", "#6C3483", "#5DADE2", "#48C9B0",
+]
+
+// 전체 화자 기준으로 색상 고정
+function makeColorPicker(speakers: string[]) {
+  const uniq = Array.from(new Set(speakers)).sort((a, b) => a.localeCompare(b))
+  const n = DISTINCT_PALETTE.length
+  const spaced = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15]
+  const map = new Map<string, string>()
+  uniq.forEach((name, i) => {
+    const idx = spaced[i % n]
+    map.set(name, DISTINCT_PALETTE[idx])
+  })
+  return (name: string) => map.get(name) ?? DISTINCT_PALETTE[0]
 }
+
+/* 아주 간단한 자체 Toast (page1과 동일 패턴) */
+function useSimpleToast() {
+  const [msg, setMsg] = useState<string | null>(null)
+  const show = (m: string) => {
+    setMsg(m)
+    setTimeout(() => setMsg(null), 2500)
+  }
+  const Toast = () =>
+    msg ? (
+      <div className="fixed top-3 right-3 z-[60]">
+        <div className="rounded-md border-2 border-red-200 bg-background px-3 py-2 shadow-md">
+          <span className="text-sm">{msg}</span>
+        </div>
+      </div>
+    ) : null
+  return { show, Toast }
+}
+
+type GlobalTopMap = Record<string, 1 | 2 | 3> // 단어 -> 전체 Top 순위(1~3)
 
 export default function SpeakerWordsPage() {
   const [file, setFile] = useState<File | null>(null)
   const [parseResult, setParseResult] = useState<ParseResult | null>(null)
-  const [analysis, setAnalysis] = useState<WordAnalysis[]>([])
-  const [globalRanks, setGlobalRanks] = useState<GlobalWordRank[]>([])
+
+  const [analysis, setAnalysis] = useState<WordAnalysis[]>([])     // 이미 분석된 결과
+  const [isAnalyzing, setIsAnalyzing] = useState(false)            // 최초/수동 분석
+  const [isRecomputing, setIsRecomputing] = useState(false)        // 화자 변경 자동 재분석
+
   const [includedSpeakers, setIncludedSpeakers] = useState<string[]>([])
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [showDetailedLog, setShowDetailedLog] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedSpeaker, setSelectedSpeaker] = useState<string>("all")
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
+  const [openKeywords, setOpenKeywords] = useState<Set<string>>(new Set())
 
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [progress, setProgress] = useState(0)
+
+  const [globalTop, setGlobalTop] = useState<GlobalTopMap>({}) // 전체 키워드 빈도 Top3
+
+  const [showTopBtn, setShowTopBtn] = useState(false)
+
+  const { show: showToast, Toast } = useSimpleToast()
+
+  // 스크롤 내려가면 Top 버튼 노출
   useEffect(() => {
-    // 카카오 SDK 로드는 사용자가 직접 설정할 수 있도록 비활성화
-    console.log("카카오톡 공유 기능을 사용하려면 Project Settings에서 카카오 JS 키를 설정하세요.")
+    const onScroll = () => setShowTopBtn(window.scrollY > 400)
+    window.addEventListener("scroll", onScroll)
+    return () => window.removeEventListener("scroll", onScroll)
   }, [])
 
+  // Top으로 스크롤
+  const scrollToTop = () => {
+    window.scrollTo({ top: 500, behavior: "smooth" })
+  }
+
+  // 색상: 파일에 존재하는 전체 화자 기준으로 고정
+  const baseSpeakers = useMemo(
+    () => (parseResult?.speakers ?? []).slice().sort((a, b) => a.localeCompare(b)),
+    [parseResult]
+  )
+  const colorOf = useMemo(() => makeColorPicker(baseSpeakers), [baseSpeakers])
+
+  // 스피커 카드 스크롤용 ref 맵 (요약 -> 상세 이동)
+  const speakerRefs = useRef<Map<string, HTMLDivElement | null>>(new Map())
+  const setSpeakerRef = (speaker: string) => (el: HTMLDivElement | null) => {
+    speakerRefs.current.set(speaker, el)
+  }
+  const scrollToSpeaker = (speaker: string) => {
+    const el = speakerRefs.current.get(speaker)
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
+  const toggleKeyword = (speaker: string, word: string) => {
+    setOpenKeywords(prev => {
+      const ns = new Set(prev)
+      const key = speaker + "||" + word
+      ns.has(key) ? ns.delete(key) : ns.add(key)
+      return ns
+    })
+  }
+
+  /* ---------------- 파일 업로드 ---------------- */
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile)
     setParseResult(null)
     setAnalysis([])
-    setGlobalRanks([])
+    setGlobalTop({})
+    setIncludedSpeakers([])
     setIsProcessing(true)
     setProgress(0)
 
     try {
-      const progressInterval = setInterval(() => {
-        setProgress((prev) => Math.min(prev + 10, 90))
-      }, 100)
-
+      const t = setInterval(() => setProgress(p => Math.min(p + 10, 90)), 100)
       const result = await parseKakaoTxt(selectedFile)
-
-      clearInterval(progressInterval)
+      clearInterval(t)
       setProgress(100)
-
       setParseResult(result)
-      setIncludedSpeakers(result.speakers)
-
-      setTimeout(() => {
-        setIsProcessing(false)
-        setProgress(0)
-      }, 500)
-    } catch (error) {
-      console.error("파일 파싱 오류:", error)
-      setIsProcessing(false)
-      setProgress(0)
-    }
-  }
-
-  const handleAnalyze = () => {
-    if (!parseResult) return
-
-    setIsAnalyzing(true)
-
-    setTimeout(() => {
-      const filteredMessages = parseResult.messages.filter((msg) => includedSpeakers.includes(msg.speaker))
-
-      const wordAnalysis = analyzeWords(filteredMessages)
-      setAnalysis(wordAnalysis)
-
-      const wordMap = new Map<string, { speaker: string; count: number }[]>()
-
-      wordAnalysis.forEach((speakerAnalysis) => {
-        speakerAnalysis.topWords.forEach((wordCount) => {
-          if (!wordMap.has(wordCount.word)) {
-            wordMap.set(wordCount.word, [])
-          }
-          wordMap.get(wordCount.word)!.push({
-            speaker: speakerAnalysis.speaker,
-            count: wordCount.count,
-          })
-        })
-      })
-
-      const globalRanking: GlobalWordRank[] = []
-      wordMap.forEach((speakers, word) => {
-        const sortedSpeakers = speakers.sort((a, b) => b.count - a.count)
-        globalRanking.push({
-          word,
-          topSpeaker: sortedSpeakers[0].speaker,
-          topCount: sortedSpeakers[0].count,
-          allSpeakers: sortedSpeakers,
-        })
-      })
-
-      setGlobalRanks(globalRanking)
-      setIsAnalyzing(false)
-    }, 1000) // 분석 시뮬레이션
-  }
-
-  const handleSpeakerRemove = (speaker: string) => {
-    setIncludedSpeakers((prev) => prev.filter((s) => s !== speaker))
-  }
-
-  const handleSpeakerAdd = (speaker: string) => {
-    if (!includedSpeakers.includes(speaker)) {
-      setIncludedSpeakers((prev) => [...prev, speaker])
+      setIncludedSpeakers(result.speakers) // 업로드 즉시 전체 화자 포함
+      setTimeout(() => { setIsProcessing(false); setProgress(0) }, 400)
+    } catch (e) {
+      console.error(e)
+      setIsProcessing(false); setProgress(0)
     }
   }
 
   const handleClearFile = () => {
-    setFile(null)
-    setParseResult(null)
-    setAnalysis([])
-    setGlobalRanks([])
+    setFile(null); setParseResult(null)
+    setAnalysis([]); setGlobalTop({})
     setIncludedSpeakers([])
-    setExpandedSections(new Set())
+    setSearchTerm(""); setSelectedSpeaker("all")
+    setOpenKeywords(new Set())
   }
 
-  const toggleSection = (sectionId: string) => {
-    setExpandedSections((prev) => {
-      const newSet = new Set(prev)
-      if (newSet.has(sectionId)) {
-        newSet.delete(sectionId)
-      } else {
-        newSet.add(sectionId)
-      }
-      return newSet
-    })
-  }
-
-  const getRankIcon = (word: string, speaker: string) => {
-    const globalRank = globalRanks.find((rank) => rank.word === word)
-    if (!globalRank) return null
-
-    const speakerRank = globalRank.allSpeakers.findIndex((s) => s.speaker === speaker) + 1
-
-    if (speakerRank === 1) {
-      return <Crown className="h-4 w-4 text-yellow-500" />
-    } else if (speakerRank === 2) {
-      return <Medal className="h-4 w-4 text-gray-400" />
-    } else if (speakerRank === 3) {
-      return <Award className="h-4 w-4 text-amber-600" />
+  /* ---------------- 최초/수동 분석 ---------------- */
+  const recomputeGlobalTop = (res: WordAnalysis[]) => {
+    const totals = new Map<string, number>()
+    for (const sa of res) for (const wc of sa.topWords) {
+      totals.set(wc.word, (totals.get(wc.word) ?? 0) + wc.count)
     }
-    return null
+    const top3 = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+    const gt: GlobalTopMap = {}
+    top3.forEach(([w], i) => (gt[w] = (i + 1) as 1 | 2 | 3))
+    setGlobalTop(gt)
   }
 
+  const handleAnalyze = () => {
+    if (!parseResult) return
+    setIsAnalyzing(true)
+    setTimeout(() => {
+      const filtered = parseResult.messages.filter(m => includedSpeakers.includes(m.speaker))
+      const res = analyzeWords(filtered)
+      setAnalysis(res)
+      recomputeGlobalTop(res)
+      setIsAnalyzing(false)
+    }, 200)
+  }
+
+  /* ---------------- 화자 추가/삭제: page1처럼 자동 재분석 ---------------- */
+  useEffect(() => {
+    if (!parseResult) return
+    if (!analysis.length) return // 아직 분석 전이면 자동 재분석 X (page1도 분석 후에만 재계산)
+
+    setIsRecomputing(true)
+    const id = setTimeout(() => {
+      const filtered = parseResult.messages.filter(m => includedSpeakers.includes(m.speaker))
+      const res = analyzeWords(filtered)
+      if (!res.length) {
+        setAnalysis([])
+        setGlobalTop({})
+        setIsRecomputing(false)
+        showToast("선택한 화자들에서 키워드 Top이 생성되지 않았습니다.")
+        return
+      }
+      setAnalysis(res)
+      recomputeGlobalTop(res)
+      setIsRecomputing(false)
+    }, 0)
+
+    return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [includedSpeakers])
+
+  // Chips: 삭제
+  const handleSpeakerRemove = (s: string) =>
+    setIncludedSpeakers(prev => prev.filter(v => v !== s))
+
+  // Chips: 추가 (파일에 존재하는 화자만 / 중복 추가 안내)
+  const handleSpeakerAdd = (s: string) => {
+    if (!parseResult) return false
+    const name = s.trim()
+    if (!name) return false
+    if (includedSpeakers.includes(name)) {
+      showToast(`"${name}" 화자는 이미 추가되어 있습니다.`)
+      return false
+    }
+    if (!parseResult.speakers.includes(name)) {
+      showToast(`"${name}" 화자는 이 대화에 존재하지 않습니다.`)
+      return false
+    }
+    setIncludedSpeakers(prev => [...prev, name])
+    return true
+  }
+
+  /* ---------------- 공유/다운로드 ---------------- */
   const handleKakaoShare = async () => {
     await captureAndKakaoShare(
       "analysis-results",
@@ -181,63 +238,87 @@ export default function SpeakerWordsPage() {
         const { url } = await res.json()
         return url as string
       },
-      {
-        title: "What's in my Kakao 분석 결과",
-        description: "키워드 분석 결과를 확인해보세요!",
-        linkUrl: typeof window !== "undefined" ? window.location.href : undefined,
-      }
+      { title: "화자별 Top 단어", description: "키워드 분석 결과를 확인해보세요!", linkUrl: typeof window !== "undefined" ? window.location.href : undefined }
     )
   }
 
   const handleDownloadCSV = () => {
-    if (analysis.length === 0) return
+    if (!analysis.length) return
     const csv = generateWordAnalysisCSV(analysis)
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
-    downloadCSV(csv, `kko-result-${timestamp}.csv`)
+    downloadCSV(csv, `kko_result_${Date.now()}.csv`)
   }
 
-  const filteredAnalysis = analysis.filter((speakerAnalysis) => {
-    if (selectedSpeaker !== "all" && speakerAnalysis.speaker !== selectedSpeaker) {
-      return false
-    }
-    if (searchTerm) {
-      return (
-        speakerAnalysis.topWords.some((word) => word.word.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        speakerAnalysis.speaker.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    }
-    return true
+  /* ---------------- 표시용 파생 ---------------- */
+  const filteredAnalysis = analysis.filter(sa => {
+    if (selectedSpeaker !== "all" && sa.speaker !== selectedSpeaker) return false
+    if (!searchTerm) return true
+    return sa.speaker.toLowerCase().includes(searchTerm.toLowerCase())
+      || sa.topWords.some(w => w.word.toLowerCase().includes(searchTerm.toLowerCase()))
   })
 
+  const top1Summary = useMemo(() => {
+    return analysis
+      .map(sa => ({
+        speaker: sa.speaker,
+        word: sa.topWords[0]?.word ?? "",
+        count: sa.topWords[0]?.count ?? 0,
+      }))
+      .filter(i => i.word)
+      .sort((a, b) => b.count - a.count)
+  }, [analysis])
+
+  const globalBadge = (word: string) => {
+    const rank = globalTop[word]
+    if (rank === 1) return <Crown className="h-4 w-4 text-yellow-500" />
+    if (rank === 2) return <Medal className="h-4 w-4 text-gray-400" />
+    if (rank === 3) return <Award className="h-4 w-4 text-amber-600" />
+    return null
+  }
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6" id="analysis-results">
+      {showTopBtn && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-6 right-6 z-50 rounded-full bg-primary text-white shadow-lg hover:bg-primary/80 transition p-3"
+          aria-label="위로"
+          title="위로"
+        >
+          <ArrowUp className="h-5 w-5" />
+        </button>
+      )}
+
+      <Toast />
       <LoadingOverlay
-        isLoading={isProcessing || isAnalyzing}
-        message={isProcessing ? "파일 분석 중..." : "단어 분석 중..."}
+        isLoading={isProcessing || isAnalyzing || isRecomputing}
+        message={
+          isProcessing ? "파일 분석 중..." :
+          isAnalyzing ? "단어 분석 중..." :
+          "필터 적용 중..."
+        }
       />
 
+      {/* 헤더 */}
       <div className="mb-8">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
           <div>
             <h1 className="text-2xl font-bold mb-2">화자별 Top 단어</h1>
-            <p className="text-muted-foreground">
-              대화 참여자별로 가장 많이 사용한 단어들을 분석하고 사용 시점을 확인합니다.
-            </p>
+            <p className="text-muted-foreground">대화 참여자별로 가장 많이 사용한 단어들을 분석하고 사용 시점을 확인합니다.</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => captureAndSave("analysis-results")} disabled={!analysis}>
+            <Button variant="outline" onClick={() => captureAndSave("analysis-results")} disabled={!analysis.length}>
               <Camera className="h-4 w-4 mr-2" />
               이미지 저장
             </Button>
-
-            <Button variant="outline" onClick={handleKakaoShare} disabled={!analysis}>
+            <Button variant="outline" onClick={handleKakaoShare} disabled={!analysis.length}>
               <Share2 className="h-4 w-4 mr-2" />
-              카카오톡 공유
+              카카오로 공유
             </Button>
           </div>
         </div>
       </div>
 
+      {/* 파일 업로드 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -252,8 +333,7 @@ export default function SpeakerWordsPage() {
           {isProcessing && (
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span>파일 분석 중...</span>
-                <span>{progress}%</span>
+                <span>파일 분석 중...</span><span>{progress}%</span>
               </div>
               <Progress value={progress} />
             </div>
@@ -263,14 +343,11 @@ export default function SpeakerWordsPage() {
             <Button onClick={handleAnalyze} disabled={!parseResult || isAnalyzing} className="flex-1">
               {isAnalyzing ? "분석 중..." : "분석하기"}
             </Button>
-            <div className="flex items-center space-x-2">
-              <Switch id="detailed-log" checked={showDetailedLog} onCheckedChange={setShowDetailedLog} />
-              <Label htmlFor="detailed-log">자세한 로그</Label>
-            </div>
           </div>
         </CardContent>
       </Card>
 
+      {/* 분석 대상 화자 */}
       {parseResult && (
         <Card>
           <CardHeader>
@@ -278,28 +355,67 @@ export default function SpeakerWordsPage() {
               <Users className="h-5 w-5" />
               분석 대상 화자
             </CardTitle>
+            <CardDescription>분석에 포함할 화자를 선택하세요. 기본적으로 모든 화자가 포함됩니다.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Chips items={includedSpeakers} onRemove={handleSpeakerRemove} onAdd={handleSpeakerAdd} addable={true} />
+            <Chips
+              items={includedSpeakers}
+              onRemove={handleSpeakerRemove}
+              onAdd={handleSpeakerAdd}
+              addable
+              getColor={colorOf}
+            />
+            {/* 자동 재분석이 돌기 때문에 별도 안내는 최소화. 필요시 아래 한 줄 유지 */}
+            {isRecomputing && (
+              <div className="mt-3 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                <Info className="h-4 w-4" />
+                필터 적용 중…
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
 
-      {analysis.length > 0 && (
+      {/* 화자별 TOP 1 요약 */}
+      {analysis.length > 0 && top1Summary.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>검색 및 필터</CardTitle>
+            <CardTitle>화자별 TOP 1 요약</CardTitle>
+            <CardDescription>카드를 클릭하면 해당 화자의 Top10 위치로 이동합니다.</CardDescription>
           </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {top1Summary.map(item => (
+                <button
+                  key={item.speaker}
+                  onClick={() => scrollToSpeaker(item.speaker)}
+                  className="text-left border rounded-lg p-3 flex items-center justify-between hover:bg-muted/40 transition"
+                  style={{ borderColor: colorOf(item.speaker) }}
+                >
+                  <div>
+                    <div className="text-xs text-muted-foreground">{item.speaker}</div>
+                    <div className="text-base md:text-lg font-semibold">{item.word}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {globalBadge(item.word)}
+                    <div className="text-sm md:text-base tabular-nums">{item.count}회</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 🔽 검색 및 필터 (요약 아래) */}
+      {analysis.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle>검색 및 필터</CardTitle></CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="search">단어 또는 화자 검색</Label>
-                <Input
-                  id="search"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="검색어를 입력하세요"
-                />
+                <Input id="search" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="검색어를 입력하세요" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="speaker-filter">화자 필터</Label>
@@ -310,11 +426,7 @@ export default function SpeakerWordsPage() {
                   className="w-full px-3 py-2 border border-input bg-background rounded-md"
                 >
                   <option value="all">모든 화자</option>
-                  {includedSpeakers.map((speaker) => (
-                    <option key={speaker} value={speaker}>
-                      {speaker}
-                    </option>
-                  ))}
+                  {baseSpeakers.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
             </div>
@@ -322,132 +434,129 @@ export default function SpeakerWordsPage() {
         </Card>
       )}
 
-      {analysis.length > 0 && (
-        <div id="analysis-results" className="space-y-6">
-          {filteredAnalysis.map((speakerAnalysis) => {
-            const topWord = speakerAnalysis.topWords[0]
-            const sectionId = `speaker-${speakerAnalysis.speaker}`
-            const isExpanded = expandedSections.has(sectionId)
-
-            return (
-              <Card key={speakerAnalysis.speaker}>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-3">
-                      <span>{speakerAnalysis.speaker}</span>
-                      {topWord && (
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary" className="flex items-center gap-1">
-                            {getRankIcon(topWord.word, speakerAnalysis.speaker)}
-                            <span className="font-bold">{topWord.word}</span>
-                            <span className="text-muted-foreground">({topWord.count}회)</span>
-                          </Badge>
-                        </div>
-                      )}
-                    </CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left py-2 px-3">순위</th>
-                          <th className="text-left py-2 px-3">단어</th>
-                          <th className="text-left py-2 px-3">횟수</th>
-                          <th className="text-left py-2 px-3">글로벌 순위</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {speakerAnalysis.topWords.map((wordCount) => (
-                          <tr key={wordCount.word} className="border-b">
-                            <td className="py-2 px-3">{wordCount.rank}</td>
-                            <td className="py-2 px-3 font-medium">{wordCount.word}</td>
-                            <td className="py-2 px-3">{wordCount.count}</td>
-                            <td className="py-2 px-3">{getRankIcon(wordCount.word, speakerAnalysis.speaker)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <Collapsible open={isExpanded} onOpenChange={() => toggleSection(sectionId)}>
-                    <CollapsibleTrigger asChild>
-                      <Button variant="ghost" className="w-full justify-between">
-                        <span>사용 시점 보기</span>
-                        {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      </Button>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="space-y-4 mt-4">
-                      {speakerAnalysis.topWords.slice(0, 5).map((wordCount) => {
-                        const usages = speakerAnalysis.wordUsages[wordCount.word] || []
-                        return (
-                          <div key={wordCount.word} className="border rounded-lg p-4">
-                            <h4 className="font-medium mb-3 flex items-center gap-2">
-                              <span>"{wordCount.word}" 사용 내역</span>
-                              <Badge variant="outline">{usages.length}회</Badge>
-                            </h4>
-                            <DataTable
-                              data={usages}
-                              columns={[
-                                { key: "date", header: "날짜", sortable: true },
-                                { key: "time", header: "시간", sortable: true },
-                                {
-                                  key: "message",
-                                  header: "메시지",
-                                  render: (value: string) => (
-                                    <div className="max-w-md truncate" title={value}>
-                                      {value}
-                                    </div>
-                                  ),
-                                },
-                              ]}
-                              pageSize={10}
-                            />
-                          </div>
-                        )
-                      })}
-                    </CollapsibleContent>
-                  </Collapsible>
-                </CardContent>
-              </Card>
-            )
-          })}
-
-          <Card>
+      {/* 화자 카드 */}
+      {filteredAnalysis.map(sa => {
+        const color = colorOf(sa.speaker)
+        return (
+          <Card
+            key={sa.speaker}
+            className="border"
+            style={{ borderColor: color }}
+            ref={setSpeakerRef(sa.speaker)}
+          >
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Download className="h-5 w-5" />
-                데이터 내보내기
+              <CardTitle className="flex items-center gap-3">
+                <span>{sa.speaker}</span>
+                {sa.topWords[0] && (
+                  <Badge variant="secondary" className="flex items-center gap-1" style={{ borderColor: color }}>
+                    <span className="font-bold">{sa.topWords[0].word}</span>
+                    <span className="text-muted-foreground">({sa.topWords[0].count}회)</span>
+                  </Badge>
+                )}
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <Button variant="outline" onClick={handleDownloadCSV}>
-                분석 결과 CSV 다운로드
-              </Button>
+            <CardContent className="space-y-4">
+              <div className="overflow-x-auto">
+                <table className="table-fixed w-full text-sm">
+                  <colgroup>
+                    <col className="w-[10%]" />
+                    <col className="w-[50%]" />
+                    <col className="w-[20%]" />
+                    <col className="w-[20%]" />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b">
+                      <th className="py-2 px-3 text-center">순위</th>
+                      <th className="py-2 px-3 text-left">단어</th>
+                      <th className="py-2 px-3 text-center">횟수</th>
+                      <th className="py-2 px-3 text-center">전체 Top</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sa.topWords.map(wc => {
+                      const key = sa.speaker + "||" + wc.word
+                      const open = openKeywords.has(key)
+                      const usages = sa.wordUsages[wc.word] || []
+                      return (
+                        <Fragment key={key}>
+                          <tr
+                            className="border-b hover:bg-muted/40 cursor-pointer"
+                            onClick={() => toggleKeyword(sa.speaker, wc.word)}
+                          >
+                            <td className="py-2 px-3 text-center">{wc.rank}</td>
+                            <td className="py-2 px-3 font-medium truncate">{wc.word}</td>
+                            <td className="py-2 px-3 text-center">{wc.count}</td>
+                            <td className="py-2 px-3 text-center">{globalBadge(wc.word)}</td>
+                          </tr>
+                          {open && (
+                            <tr className="bg-muted/20">
+                              <td colSpan={4} className="py-3 px-3">
+                                <div className="border rounded-lg p-3">
+                                  <h4 className="font-medium mb-2 flex items-center gap-2">
+                                    <span>"{wc.word}" 사용 내역</span>
+                                    <Badge variant="outline" style={{ borderColor: color }}>{usages.length}회</Badge>
+                                  </h4>
+                                  <DataTable
+                                    data={usages}
+                                    columns={[
+                                      {
+                                        key: "message",
+                                        header: "메시지",
+                                        render: (value: string) => (
+                                          <div className="max-w-md truncate" title={value}>{value}</div>
+                                        ),
+                                      },
+                                      { key: "date", header: "날짜", sortable: true },
+                                      { key: "time", header: "시간", sortable: true },
+                                    ]}
+                                    pageSize={10}
+                                  />
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </CardContent>
           </Card>
-        </div>
-      )}
+        )
+      })}
 
-      {!parseResult && !isProcessing && (
-        <EmptyState
-          title="TXT를 업로드해 시작하세요"
-          description="카카오톡 대화 파일을 업로드하면 화자별 단어 분석을 시작할 수 있습니다."
-        />
-      )}
-
-      {showDetailedLog && parseResult && (
+      {/* 내보내기 */}
+      {analysis.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>상세 로그</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Download className="h-5 w-5" />
+              데이터 내보내기
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-sm text-muted-foreground space-y-1">
+            <Button variant="outline" onClick={handleDownloadCSV}>분석 결과 CSV 다운로드</Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 빈 상태 */}
+      {!parseResult && !isProcessing && (
+        <EmptyState title="TXT를 업로드해 시작하세요" description="카카오톡 대화 파일을 업로드하면 화자별 단어 분석을 시작할 수 있습니다." />
+      )}
+
+      {/* 파일 정보 */}
+      {parseResult && (
+        <Card>
+          <CardHeader>
+            <CardTitle>파일 정보</CardTitle>
+            <CardDescription>업로드한 대화 파일의 기본 정보를 확인하세요.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+              <p>참여자 수: {parseResult.speakers.length}</p>
               <p>총 메시지 수: {parseResult.messages.length}</p>
-              <p>유효한 메시지 수: {parseResult.validMessages}</p>
-              <p>전체 라인 수: {parseResult.totalLines}</p>
-              <p>추출된 화자 수: {parseResult.speakers.length}</p>
               <p>대화 시작일: {parseResult.conversationStartDate}</p>
             </div>
           </CardContent>
@@ -458,7 +567,5 @@ export default function SpeakerWordsPage() {
 }
 
 declare global {
-  interface Window {
-    Kakao: any
-  }
+  interface Window { Kakao: any }
 }
