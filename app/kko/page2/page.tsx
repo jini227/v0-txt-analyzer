@@ -61,6 +61,21 @@ function useSimpleToast() {
   return { show, Toast }
 }
 
+function escapeRegExp(str: string) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function highlightKeyword(text: string, keyword: string) {
+  if (!keyword) return text
+  const re = new RegExp(`(${escapeRegExp(keyword)})`, "gi")
+  const parts = text.split(re)
+  return parts.map((p, i) =>
+    re.test(p)
+      ? <mark key={i} className="bg-yellow-100 px-0.5 rounded">{p}</mark>
+      : <span key={i}>{p}</span>
+  )
+}
+
 type GlobalTopMap = Record<string, 1 | 2 | 3> // 단어 -> 전체 Top 순위(1~3)
 
 export default function SpeakerWordsPage() {
@@ -503,7 +518,9 @@ export default function SpeakerWordsPage() {
                                         key: "message",
                                         header: "메시지",
                                         render: (value: string) => (
-                                          <div className="max-w-md truncate" title={value}>{value}</div>
+                                          <div className="max-w-md truncate" title={value}>
+                                            {highlightKeyword(value, wc.word)}
+                                          </div>
                                         ),
                                       },
                                       { key: "date", header: "날짜", sortable: true },
