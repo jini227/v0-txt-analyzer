@@ -259,10 +259,12 @@ export default function SpeakerWordsPage() {
 
   const globalBadge = (word: string) => {
     const rank = globalTop[word]
-    if (rank === 1) return <Crown className="h-4 w-4 text-yellow-500" />
-    if (rank === 2) return <Medal className="h-4 w-4 text-gray-400" />
-    if (rank === 3) return <Award className="h-4 w-4 text-amber-600" />
-    return null
+    if (!rank) return null
+    const color =
+      rank === 1 ? "w-5 h-5 text-yellow-400 stroke-[2.5]" :   // 금
+      rank === 2 ? "w-4 h-4 text-gray-400 stroke-[2]"  :    // 은
+                  "w-4 h-4 text-amber-600 stroke-[2]"      // 동
+    return <Crown className={`h-4 w-4 ${color}`} />
   }
 
   return (
@@ -362,17 +364,19 @@ export default function SpeakerWordsPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {globalTopList.map((item, idx) => (
-                <div key={item.word} className="border rounded-lg p-3 flex items-center justify-between">
-                  <div className="text-base font-semibold">{item.word}</div>
-                  <div className="flex items-center gap-2">
-                    {idx === 0 && <Crown className="h-4 w-4 text-yellow-500" />}
-                    {idx === 1 && <Medal className="h-4 w-4 text-gray-400" />}
-                    {idx === 2 && <Award className="h-4 w-4 text-amber-600" />}
-                    <div className="text-sm tabular-nums">{item.count}회</div>
+              {globalTopList.map((item, idx) => {
+                const color = idx === 0 ? "text-yellow-500" : idx === 1 ? "text-gray-400" : "text-amber-600"
+                return (
+                  <div key={item.word} className="border rounded-lg p-3 flex items-center justify-between">
+                    <div className="text-base font-semibold">{item.word}</div>
+                    <div className="flex items-center gap-2">
+                      <Crown className={`h-4 w-4 ${color}`} />
+                      <div className="text-sm tabular-nums">{item.count}회</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
+
             </div>
           </CardContent>
         </Card>
@@ -466,8 +470,8 @@ export default function SpeakerWordsPage() {
                 <div className="overflow-x-auto">
                   <table className="table-fixed w-full text-sm">
                     <colgroup>
-                      <col className="w-[10%]" />
-                      <col className="w-[60%]" />
+                      <col className="w-[15%]" />
+                      <col className="w-[55%]" />
                       <col className="w-[30%]" />
                     </colgroup>
                     <thead>
