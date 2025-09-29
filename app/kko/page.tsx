@@ -47,7 +47,7 @@ export default function KkoMenuPage() {
         <img
           src="/chatmates.png"
           alt="Chat Mates Mascot"
-          className="mx-auto mb-6 w-40 h-auto"
+          className="mx-auto mb-4 w-24 h-auto sm:w-40"
         />
         <h1 className="text-3xl font-bold text-balance mb-4">What's in my Kakao</h1>
         <p className="text-lg text-muted-foreground text-pretty max-w-2xl mx-auto text-sm">
