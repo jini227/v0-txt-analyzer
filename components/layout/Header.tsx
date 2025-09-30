@@ -1,5 +1,6 @@
 "use client"
 
+import { SITE } from "@/lib/site";
 import Link from "next/link"
 import { ChevronLeft } from "lucide-react"
 import { usePathname } from "next/navigation"
@@ -8,11 +9,12 @@ export function Header() {
   const pathname = usePathname()
 
   const getBreadcrumb = () => {
-    if (pathname === "/kko" || pathname === "/kko/") return "What's in my Kakao"
-    if (pathname === "/kko/page1" || pathname === "/kko/page1/") return "What's in my Kakao"
-    if (pathname === "/kko/page2" || pathname === "/kko/page2/") return "What's in my Kakao"
-    if (pathname === "/kko/page3" || pathname === "/kko/page3/") return "What's in my Kakao"
-    return "What's in my Kakao"
+    // 현재 상단 메뉴명 비노출, 서비스명으로 통일 함. 변경 시 주석 해제 및 메뉴명 추가
+    // if (pathname === "/kko" || pathname === "/kko/") return SITE.name;
+    // if (pathname === "/kko/page1" || pathname === "/kko/page1/") return SITE.name;
+    // if (pathname === "/kko/page2" || pathname === "/kko/page2/") return SITE.name;
+    // if (pathname === "/kko/page3" || pathname === "/kko/page3/") return SITE.name;
+    return SITE.name;
   }
 
   const isMenuPage = pathname === "/kko" || pathname === "/kko/"

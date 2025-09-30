@@ -1,5 +1,6 @@
 "use client"
 
+import { SITE } from "@/lib/site";
 import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -440,7 +441,7 @@ export default function VibeAnalysisPage() {
         return url as string
       },
       {
-        title: "What's in my Kakao 분석 결과",
+        title: `${SITE.name} 분석 결과`,
         description: "키워드 분석 결과를 확인해보세요!",
         linkUrl: typeof window !== "undefined" ? window.location.href : undefined,
       }

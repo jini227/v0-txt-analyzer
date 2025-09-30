@@ -1,5 +1,6 @@
 "use client";
 
+import { SITE } from "@/lib/site";
 import { useMemo, useState, useEffect } from "react";
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -279,7 +280,7 @@ export default function KeywordCounterPage() {
         const { url } = await res.json();
         return url as string;
       },
-      { title: "What's in my Kakao 분석 결과", description: "키워드 분석 결과를 확인해보세요!", linkUrl: typeof window !== "undefined" ? window.location.href : undefined }
+      { title: `${SITE.name} 분석 결과`, description: "키워드 분석 결과를 확인해보세요!", linkUrl: typeof window !== "undefined" ? window.location.href : undefined }
     );
   };
 

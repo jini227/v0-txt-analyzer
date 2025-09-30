@@ -1,5 +1,6 @@
 "use client"
 
+import { SITE } from "@/lib/site";
 import Link from "next/link"
 import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -49,10 +50,9 @@ export default function KkoMenuPage() {
           alt="Chat Mates Mascot"
           className="mx-auto mb-4 w-24 h-auto sm:w-40"
         />
-        <h1 className="text-3xl font-bold text-balance mb-4">What's in my Kakao</h1>
+        <h1 className="text-3xl font-bold text-balance mb-4">{SITE.name}</h1>
         <p className="text-lg text-muted-foreground text-pretty max-w-2xl mx-auto text-sm">
-          카카오톡 대화 파일을 업로드하여 키워드 분석, 화자별 단어 분석, 대화 분위기 분석을 수행할 수 있습니다. 모든
-          분석은 브라우저에서만 처리되어 개인정보가 안전하게 보호됩니다.
+          {SITE.description}
         </p>
       </div>
 

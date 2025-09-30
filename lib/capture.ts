@@ -1,6 +1,7 @@
 // lib/capture.ts
 "use client"
 
+import { SITE } from "@/lib/site";
 import { toPng } from "html-to-image"
 
 /** elementId를 캡처해 dataURL 반환 */
@@ -84,7 +85,7 @@ export async function captureAndKakaoShare(
     Kakao.Share.sendDefault({
       objectType: "feed",
       content: {
-        title: opts?.title ?? "What's in my Kakao 분석 결과",
+        title: opts?.title ?? `${SITE.name} 분석 결과`,
         description: opts?.description ?? "키워드 분석 결과를 확인해보세요!",
         imageUrl,
         link: { mobileWebUrl: linkUrl, webUrl: linkUrl },
@@ -100,7 +101,7 @@ export async function captureAndKakaoShare(
   Kakao.Link.sendDefault({
     objectType: "feed",
     content: {
-      title: opts?.title ?? "What's in my Kakao 분석 결과",
+      title: opts?.title ?? `${SITE.name} 분석 결과`,
       description: opts?.description ?? "키워드 분석 결과를 확인해보세요!",
       imageUrl,
       link: { mobileWebUrl: linkUrl, webUrl: linkUrl },
