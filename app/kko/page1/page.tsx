@@ -16,6 +16,7 @@ import {
   BarChart as ReBarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
 } from "recharts";
+import type { TooltipProps } from "recharts";
 import {
   Download, FileText, Users, Camera, Share2, UserRound, Clock, Activity, MessageSquare, CalendarDays, TrendingUp,
 } from "lucide-react";
@@ -26,13 +27,14 @@ import { analyzeKeyword } from "@/lib/analysis";
 import {
   generateKeywordSummaryCSV, generateKeywordDetailsCSV, downloadCSV,
 } from "@/lib/csv";
-import { captureAndSave, captureAndKakaoShare } from "@/lib/capture";
+import { captureAndSave, captureAndShareSmart } from "@/lib/capture";
 import type { ParseResult } from "@/lib/parseKakao";
 import type { KeywordAnalysis } from "@/lib/analysis";
 import { LoadingOverlay } from "@/components/ui/loading-overlay";
 import {
   Accordion, AccordionItem, AccordionTrigger, AccordionContent,
 } from "@/components/ui/accordion";
+import { readShareStateFromLocation } from "@/lib/share-state";
 
 /* ------------------------------------------------------------------ */
 /* types & helpers                                                     */
@@ -56,18 +58,15 @@ const DISTINCT_PALETTE = [
   "#581845", "#6C3483", "#5DADE2", "#48C9B0",
 ];
 
-// 전체 화자 기준으로 색상 고정
 function makeColorPicker(speakers: string[]) {
   const uniq = Array.from(new Set(speakers)).sort((a, b) => a.localeCompare(b));
   const n = DISTINCT_PALETTE.length;
   const spaced = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
-
   const map = new Map<string, string>();
   uniq.forEach((name, i) => {
     const idx = spaced[i % n];
     map.set(name, DISTINCT_PALETTE[idx]);
   });
-
   return (name: string) => map.get(name) ?? DISTINCT_PALETTE[0];
 }
 
@@ -103,7 +102,6 @@ function speakerDateRange(rows: { date: string; time: string }[]) {
   };
 }
 
-/* Y축 라벨(화자명) - 앞 3글자 + … */
 const makeSpeakerTick =
   (colorOf: (name: string) => string) =>
   ({ x, y, payload }: any) => {
@@ -116,7 +114,6 @@ const makeSpeakerTick =
     );
   };
 
-/* 아주 간단한 자체 Toast */
 function useSimpleToast() {
   const [msg, setMsg] = useState<string | null>(null);
   const show = (m: string) => {
@@ -150,6 +147,9 @@ export default function KeywordCounterPage() {
   const [isRecomputing, setIsRecomputing] = useState(false);
   const [enforceExisting, setEnforceExisting] = useState(true);
 
+  // 공유 복원 가드
+  const [hydratedFromShare, setHydratedFromShare] = useState(false);
+
   const { show: showToast, Toast } = useSimpleToast();
 
   const baseSpeakers = useMemo(
@@ -158,9 +158,64 @@ export default function KeywordCounterPage() {
   );
   const colorOf = useMemo(() => makeColorPicker(baseSpeakers), [baseSpeakers]);
 
+  /* ----------------- 공유 URL로 진입 시 상태 복원 ----------------- */
+  useEffect(() => {
+    const s = readShareStateFromLocation();
+    if (!s) return;
+
+    try {
+      // 기본 필드
+      if (s.keyword) setKeyword(String(s.keyword));
+      if (Array.isArray(s.includedSpeakers)) setIncludedSpeakers(s.includedSpeakers);
+
+      // 최소 요구 필드 확인
+      if (s.meta?.conversationStartDate && Array.isArray(s.analysis?.speakerStats)) {
+        // ParseResult: messages 필드가 필요하므로 'any'로 비워서 타입만 맞춰줍니다.
+        setParseResult({
+          speakers: Array.from(
+            new Set((s.analysis.speakerStats as any[]).map((x) => String(x.speaker)))
+          ),
+          conversationStartDate: String(s.meta.conversationStartDate),
+          messages: [] as any, // 공유 복원에서는 원문 불필요 → 타입만 충족
+        } as unknown as ParseResult);
+
+        // speakerStats를 정규화(필수 필드만 보장)
+        const lightSpeakerStats = (s.analysis.speakerStats as any[]).map((x) => ({
+          speaker: String(x.speaker),
+          totalHits: Number(x.totalHits ?? x.count ?? 0),
+          // 원 타입이 messageCount를 요구할 수 있으므로 기본값 보강
+          messageCount: Number(x.messageCount ?? 0),
+        }));
+
+        // summary도 totalKeywordHits가 필요할 수 있어 보강
+        const totalFromStats = lightSpeakerStats.reduce((a, b) => a + (b.totalHits || 0), 0);
+        const lightSummary = {
+          ...(s.analysis.summary ?? {}),
+          totalKeywordHits: Number(s.analysis?.summary?.totalKeywordHits ?? totalFromStats ?? 0),
+        } as any;
+
+        // KeywordAnalysis 전체를 타입에 맞게 구성
+        const restored = {
+          keyword: String(s.keyword ?? ""),
+          summary: lightSummary,
+          speakerStats: lightSpeakerStats,
+          // 공유 상태에서는 timeline을 싣지 않으므로 빈 배열로 채움
+          timeline: [] as any,
+        } as unknown as KeywordAnalysis;
+
+        setAnalysis(restored);
+        setHydratedFromShare(true);
+      }
+    } catch (e) {
+      console.warn("공유 상태 복원 실패:", e);
+    }
+  }, []);
+
+  // 선택 화자 변경 시 재계산 (공유 복원 화면에서는 실행 안 함)
   useEffect(() => {
     if (!analysis) return;
     if (!parseResult || !keyword.trim()) return;
+    if (hydratedFromShare) return;
 
     setIsRecomputing(true);
     const id = setTimeout(() => {
@@ -180,6 +235,7 @@ export default function KeywordCounterPage() {
   }, [includedSpeakers]);
 
   const handleFileSelect = async (selectedFile: File) => {
+    setHydratedFromShare(false);
     setFile(selectedFile);
     setParseResult(null);
     setAnalysis(null);
@@ -236,6 +292,7 @@ export default function KeywordCounterPage() {
   };
 
   const handleClearFile = () => {
+    setHydratedFromShare(false);
     setFile(null);
     setParseResult(null);
     setAnalysis(null);
@@ -268,20 +325,33 @@ export default function KeywordCounterPage() {
     URL.revokeObjectURL(url);
   };
 
+  /* ===== 공유 상태(라이트) 생성 ===== */
+  const getShareState = () => ({
+    page: "page1",
+    keyword,
+    includedSpeakers,
+    meta: { conversationStartDate: parseResult?.conversationStartDate ?? "" },
+    analysis: analysis
+      ? {
+          summary: analysis.summary,
+          speakerStats: analysis.speakerStats.map(s => ({
+            speaker: s.speaker,
+            totalHits: s.totalHits,
+          })),
+        }
+      : null,
+  });
+
   const handleKakaoShare = async () => {
-    await captureAndKakaoShare(
-      "analysis-results",
-      async (dataUrl: string) => {
-        const blob = await (await fetch(dataUrl)).blob();
-        const formData = new FormData();
-        formData.append("image", blob, "analysis.png");
-        const res = await fetch("/api/share/upload", { method: "POST", body: formData });
-        if (!res.ok) throw new Error("업로드 실패");
-        const { url } = await res.json();
-        return url as string;
-      },
-      { title: `${SITE.name} 분석 결과`, description: "키워드 분석 결과를 확인해보세요!", linkUrl: typeof window !== "undefined" ? window.location.href : undefined }
-    );
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    await captureAndShareSmart("analysis-results", "kko-result", {
+      title: `#${keyword} 결과 공유`,
+      text: analysis
+        ? `TOP: ${[...analysis.speakerStats].sort((a,b)=>b.totalHits-a.totalHits)[0]?.speaker ?? "-"}`
+        : "결과 보기",
+      linkUrl: `${origin}/kko/result`,  // ✅ result 전용 페이지
+      getShareState,
+    });
   };
 
   const chartHeight = useMemo(() => {
@@ -297,7 +367,6 @@ export default function KeywordCounterPage() {
       .filter((sp) => includedSpeakers.includes(sp));
   }, [analysis, includedSpeakers]);
 
-  /* ----------------------------- 데이터 시각화 KPIs ----------------------------- */
   const dataViz = useMemo(() => {
     if (!analysis || !parseResult) return null;
 
@@ -318,8 +387,8 @@ export default function KeywordCounterPage() {
     const activeSpeakers = analysis.speakerStats.filter((s) => s.totalHits > 0).length;
     const selectedSpeakers = includedSpeakers.length;
 
-    const totalMessages = parseResult.messages.reduce((acc, m) => {
-      if (!selectedSpeakers || includedSpeakers.includes(m.speaker)) return acc + 1;
+    const totalMessages = (parseResult.messages ?? []).reduce((acc, m) => {
+      if (!selectedSpeakers || includedSpeakers.includes((m as any).speaker)) return acc + 1;
       return acc;
     }, 0);
 
@@ -334,8 +403,6 @@ export default function KeywordCounterPage() {
     }
 
     const avgPerDay = daysElapsed > 0 ? totalHits / daysElapsed : 0;
-
-    // 추가 KPI: 키워드 포함 메시지 수(= 타임라인 건수)
     const keywordMsgCount = (analysis.timeline as unknown as TimelineRow[]).length;
 
     return {
@@ -441,7 +508,7 @@ export default function KeywordCounterPage() {
       {analysis && parseResult && (
         <div id="analysis-results" className="space-y-6">
 
-          {/* TOP 1 (차트 위에만 노출) */}
+          {/* TOP 1 */}
           <Card className="rounded-xl">
             <CardHeader className="pb-2 pt-3 px-4">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -496,20 +563,22 @@ export default function KeywordCounterPage() {
                       />
                       <Tooltip
                         cursor={{ fill: "rgba(0,0,0,0.04)" }}
-                        content={({ active, payload }) => {
-                          if (!active || !payload?.length) return null;
-                          const p = payload[0];
-                          const speaker = p?.payload?.name as string;
-                          const color = colorOf(speaker);
+                        content={(props: TooltipProps<number, string>) => {
+                          const { active, payload } = props
+                          if (!active || !payload || payload.length === 0) return null
+                          const p: any = payload[0]
+                          const speaker = String(p?.payload?.name ?? "")
+                          const value = Number(p?.value ?? 0)
+                          const color = colorOf(speaker)
                           return (
                             <div className="rounded-md border bg-background px-2.5 py-1.5 text-sm shadow-sm">
                               <div className="flex items-center gap-2">
                                 <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
                                 <span className="font-medium">{speaker}</span>
                               </div>
-                              <div className="mt-1 text-muted-foreground">총 {nf(p?.value)}회</div>
+                              <div className="mt-1 text-muted-foreground">총 {nf(value)}회</div>
                             </div>
-                          );
+                          )
                         }}
                       />
                       <Bar dataKey="count" barSize={14} radius={[4, 4, 4, 4]}>
@@ -524,84 +593,86 @@ export default function KeywordCounterPage() {
             </CardContent>
           </Card>
 
-          {/* 타임라인 */}
-          <Card>
-            <CardHeader>
-              <CardTitle>타임라인</CardTitle>
-              <CardDescription>화자 이름을 클릭하면 해당 화자의 타임라인이 열립니다.</CardDescription>
-            </CardHeader>
+          {/* 타임라인: 공유 복원 화면에서는 숨김 */}
+          {!hydratedFromShare && (
+            <Card>
+              <CardHeader>
+                <CardTitle>타임라인</CardTitle>
+                <CardDescription>화자 이름을 클릭하면 해당 화자의 타임라인이 열립니다.</CardDescription>
+              </CardHeader>
 
-            <CardContent>
-              <Accordion type="multiple" className="w-full">
-                {(() => {
-                  const grouped = groupTimelineBySpeaker(
-                    analysis.timeline as unknown as TimelineRow[]
-                  );
+              <CardContent>
+                <Accordion type="multiple" className="w-full">
+                  {(() => {
+                    const grouped = groupTimelineBySpeaker(
+                      analysis.timeline as unknown as TimelineRow[]
+                    );
 
-                  return orderedSpeakers.map((speaker) => {
-                    const color = colorOf(speaker);
-                    const rows = grouped.get(speaker) ?? [];
-                    if (rows.length === 0) return null;
+                    return orderedSpeakers.map((speaker) => {
+                      const color = colorOf(speaker);
+                      const rows = grouped.get(speaker) ?? [];
+                      if (rows.length === 0) return null;
 
-                    const { first, last } = speakerDateRange(rows);
+                      const { first, last } = speakerDateRange(rows);
 
-                    return (
-                      <AccordionItem key={speaker} value={speaker} className="rounded-lg border mb-3">
-                        <AccordionTrigger className="px-4 py-3">
-                          <div className="flex w-full items-center justify-between gap-3 min-w-0">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <span className="h-4 w-1 rounded" style={{ backgroundColor: color }} />
-                              <span className="font-semibold truncate">{speaker}</span>
+                      return (
+                        <AccordionItem key={speaker} value={speaker} className="rounded-lg border mb-3">
+                          <AccordionTrigger className="px-4 py-3">
+                            <div className="flex w-full items-center justify-between gap-3 min-w-0">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <span className="h-4 w-1 rounded" style={{ backgroundColor: color }} />
+                                <span className="font-semibold truncate">{speaker}</span>
+                              </div>
+                              <span className="text-xs px-2 py-1 rounded-full bg-muted text-foreground shrink-0" style={{ border: `1px solid ${color}` }}>
+                                {nf(rows.length)}건
+                              </span>
                             </div>
-                            <span className="text-xs px-2 py-1 rounded-full bg-muted text-foreground shrink-0" style={{ border: `1px solid ${color}` }}>
-                              {nf(rows.length)}건
-                            </span>
-                          </div>
-                        </AccordionTrigger>
+                          </AccordionTrigger>
 
-                        <AccordionContent className="px-0 pb-0">
-                          <div className="px-4 pb-4">
-                            <div className="mb-2 text-[11px] text-muted-foreground">
-                              최초 {first} · 최신 {last}
-                            </div>
+                          <AccordionContent className="px-0 pb-0">
+                            <div className="px-4 pb-4">
+                              <div className="mb-2 text-[11px] text-muted-foreground">
+                                최초 {first} · 최신 {last}
+                              </div>
 
-                            <div className="overflow-x-auto">
-                              <div className="min-w-[680px]">
-                                <div className="hidden sm:grid sm:grid-cols-[180px_1fr] text-[12px] uppercase text-muted-foreground bg-muted/50 sticky top-0 px-4 py-2">
-                                  <div>날짜 / 시간</div>
-                                  <div>메시지</div>
-                                </div>
+                              <div className="overflow-x-auto">
+                                <div className="min-w-[680px]">
+                                  <div className="hidden sm:grid sm:grid-cols-[180px_1fr] text-[12px] uppercase text-muted-foreground bg-muted/50 sticky top-0 px-4 py-2">
+                                    <div>날짜 / 시간</div>
+                                    <div>메시지</div>
+                                  </div>
 
-                                <ul>
-                                  {rows.map((r, i) => (
-                                    <li
-                                      key={i}
-                                      className="grid grid-cols-1 sm:grid-cols-[180px_1fr] items-start border-b last:border-0 px-4 py-2 odd:bg-muted/10 hover:bg-muted/20 transition-colors"
-                                    >
-                                      <div className="sm:py-2 sm:pr-2 text-[11px] text-muted-foreground font-mono tabular-nums">
-                                        {r.date} {r.time}
-                                      </div>
-                                      <div className="sm:py-2 sm:pr-2 text-sm leading-relaxed">
-                                        <div className="max-w-[70ch] sm:max-w-[90ch]">
-                                          {highlightKeyword(r.message, analysis.keyword)}
+                                  <ul>
+                                    {rows.map((r, i) => (
+                                      <li
+                                        key={i}
+                                        className="grid grid-cols-1 sm:grid-cols-[180px_1fr] items-start border-b last:border-0 px-4 py-2 odd:bg-muted/10 hover:bg-muted/20 transition-colors"
+                                      >
+                                        <div className="sm:py-2 sm:pr-2 text-[11px] text-muted-foreground font-mono tabular-nums">
+                                          {r.date} {r.time}
                                         </div>
-                                      </div>
-                                    </li>
-                                  ))}
-                                </ul>
+                                        <div className="sm:py-2 sm:pr-2 text-sm leading-relaxed">
+                                          <div className="max-w-[70ch] sm:max-w-[90ch]">
+                                            {highlightKeyword(r.message, analysis.keyword)}
+                                          </div>
+                                        </div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                    );
-                  });
-                })()}
-              </Accordion>
-            </CardContent>
-          </Card>
+                          </AccordionContent>
+                        </AccordionItem>
+                      );
+                    });
+                  })()}
+                </Accordion>
+              </CardContent>
+            </Card>
+          )}
 
-          {/* 데이터 시각화 (Timeline 아래) */}
+          {/* 데이터 시각화 */}
           {dataViz && (
             <Card>
               <CardHeader>
@@ -692,13 +763,13 @@ export default function KeywordCounterPage() {
   );
 }
 
-/* ----------------------------- KPI 컴포넌트 ----------------------------- */
+/* ----------------------------- KPI ----------------------------- */
 function Kpi({
   icon,
   label,
   value,
-  hint, // 값 오른쪽 작은 보조 텍스트
-  sub,  // 값 아래 매우 작은 보조 텍스트
+  hint,
+  sub,
 }: {
   icon: React.ReactNode;
   label: string;
