@@ -26,41 +26,57 @@ async function captureElementDataUrl(elementId: string): Promise<string> {
   })
 }
 
-/** dataURL을 기기 특성에 맞춰 저장/공유 */
-async function saveOrShareImage(dataUrl: string, filename: string) {
-  const canShareFiles = "share" in navigator && "canShare" in navigator
-  if (canShareFiles) {
+async function saveImage(dataUrl: string, filename: string) {
+  // dataURL → Blob → ObjectURL 경로가 가장 안정적
+  const blob = await (await fetch(dataUrl)).blob();
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  // 일부 모바일 브라우저 호환을 위해 약간 지연 후 정리
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+
+  // iOS 인앱 등 download 미지원 대비(최후 폴백)
+  // @ts-ignore
+  if (!("download" in HTMLAnchorElement.prototype)) {
+    try { window.open(url, "_blank"); } catch {}
+  }
+}
+
+
+async function shareImage(dataUrl: string, filename: string) {
+  if ("share" in navigator && "canShare" in navigator) {
     try {
-      const blob = await (await fetch(dataUrl)).blob()
-      const file = new File([blob], filename, { type: "image/png" })
+      const blob = await (await fetch(dataUrl)).blob();
+      const file = new File([blob], filename, { type: "image/png" });
       // @ts-ignore
       if (navigator.canShare?.({ files: [file] })) {
         // @ts-ignore
-        await navigator.share({ files: [file], title: filename })
-        return
+        await navigator.share({ files: [file], title: filename });
+        return;
       }
-    } catch {}
+    } catch { /* 폴백 아래로 */ }
   }
-
-  // 일반 다운로드
-  const a = document.createElement("a")
-  a.href = dataUrl
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-
-  // iOS 인앱 등 download 미지원일 때
-  if (!("download" in HTMLAnchorElement.prototype)) {
-    try { window.open(dataUrl, "_blank") } catch {}
-  }
+  await saveImage(dataUrl, filename); // 공유 불가 → 저장
 }
 
 /** 버튼에서 바로 호출: 캡처 → 저장/공유 */
 export async function captureAndSave(elementId: string, filenamePrefix = "kko-result") {
   const dataUrl = await captureElementDataUrl(elementId)
   const ts = new Date().toISOString().replace(/[:.]/g, "-")
-  await saveOrShareImage(dataUrl, `${filenamePrefix}-${ts}.png`)
+  await saveImage(dataUrl, `${filenamePrefix}-${ts}.png`)
+}
+
+export async function captureAndShare(elementId: string, filenamePrefix = "kko-result") {
+  const dataUrl = await captureElementDataUrl(elementId);
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  await shareImage(dataUrl, `${filenamePrefix}-${ts}.png`);
 }
 
 /**
